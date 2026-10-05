@@ -2,13 +2,18 @@
 from pathlib import Path
 import argparse
 import json
+import os
+import re
 import stat
 import zipfile
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=root.parent / 'api-motoapex-hostinger.zip')
+parser.add_argument('--revision', default=os.environ.get('GITHUB_SHA', ''))
 args = parser.parse_args()
+if args.revision and not re.fullmatch(r'[a-f0-9]{40}', args.revision):
+    parser.error('--revision must be a full Git commit SHA')
 destination = args.output.resolve()
 instructions = '''INSTALACION API MOTOAPEX
 
@@ -44,7 +49,7 @@ instructions = '''INSTALACION API MOTOAPEX
    Si persiste 403 HTML, revisa los logs de acceso/errores, propietario,
    document root y reglas de hPanel/CDN. No desactives la seguridad global.
 
-5. Selecciona PHP 8.3 o superior con PDO MySQL y habilita HTTPS.
+5. Selecciona PHP 8.3 o superior con PDO MySQL y Sodium, y habilita HTTPS.
    Desactiva mostrar errores PHP al visitante.
 
 6. Crea el usuario administrador mediante bin/create-admin.php, desde terminal:
@@ -81,6 +86,8 @@ for path in ('bin/create-admin.php', 'database/002_api_support.sql', 'database/0
     files[path] = (root / path).read_bytes()
 files['LEEME-INSTALACION.txt'] = instructions.encode('utf-8')
 files['deployment-manifest.json'] = json.dumps({
+    'sourceRevision': args.revision or None,
+    'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts'],
     'documentRoot': 'public_html',
     'entrypoint': 'public_html/index.php',
     'privateConfig': 'config.local.php (create on server, not included)',
