@@ -17,13 +17,13 @@ blocks=[{'type':'heading','text':'Heading','level':2},{'type':'paragraph','text'
 p.update(contentFormat='blocks',content=blocks)
 assert call('admin/pages/'+page['id'],'PUT',p,'editor')['content']==blocks
 call('admin/pages/'+page['id'],'PUT',dict(p,content=[{'type':'html','text':'<script>'}]),'editor',422)
-b={'title':'Test hero','subtitle':'Subtitle','imageUrl':'https://example.test/desktop.jpg','mobileImageUrl':'https://example.test/mobile.jpg','alt':'Motorcycle','brandId':None,'accentColor':'#123ABC','ctaPrimary':{'text':'Catalog','href':'/catalogo'},'ctaSecondary':{'text':'Contact','href':'https://example.test/contact'},'placement':'home_hero','order':1,'status':'active','startsAt':None,'endsAt':None,'pageId':page['id']}
+b={'title':'Test hero','subtitle':'Subtitle','imageUrl':'https://example.test/desktop.jpg','mobileImageUrl':'https://example.test/mobile.jpg','alt':'Motorcycle','brandId':None,'accentColor':'#123ABC','ctaPrimary':{'label':'Catalog','href':'/catalogo'},'ctaSecondary':{'label':'Contact','href':'https://example.test/contact'},'placement':'home_hero','order':1,'status':'active','startsAt':None,'endsAt':None,'pageId':page['id']}
 banner=call('admin/banners','POST',b,'marketing',201)
 assert call('public/banners/'+banner['id'])['ctaPrimary']==b['ctaPrimary']
 assert isinstance(banner['id'],str)
 assert any(x['id']==banner['id'] for x in call('public/banners?placement=home_hero'))
 assert not call('public/banners?placement=elsewhere')
-for changes in ({'ctaPrimary':{'text':'Hack','href':'javascript:alert(1)'}},{'accentColor':'red'},{'imageUrl':'http://example.test/a.jpg'},{'brandId':'999999'},{'startsAt':date(1),'endsAt':date(-1)},{'startsAt':'2026-02-30T12:00:00Z'}):
+for changes in ({'ctaPrimary':{'label':'Hack','href':'javascript:alert(1)'}},{'accentColor':'red'},{'imageUrl':'http://example.test/a.jpg'},{'brandId':'999999'},{'startsAt':date(1),'endsAt':date(-1)},{'startsAt':'2026-02-30T12:00:00Z'}):
     call('admin/banners/'+banner['id'],'PUT',dict(b,**changes),'admin',422)
 for changes in ({'status':'inactive'},{'startsAt':date(1)},{'endsAt':date(-1)}):
     call('admin/banners/'+banner['id'],'PUT',dict(b,**changes),'editor')

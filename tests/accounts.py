@@ -143,6 +143,8 @@ assert call('auth/mfa/status',token=new['token'])['enabled']
 call('auth/mfa/challenge','POST',{'challengeToken':c['challengeToken'],'recoveryCode':codes[1]},expected=401)
 c=login(new); call('auth/mfa/challenge','POST',{'challengeToken':c['challengeToken'],'recoveryCode':codes[0]},expected=401)
 c=login(new); control('expire-challenges'); call('auth/mfa/challenge','POST',{'challengeToken':c['challengeToken'],'recoveryCode':codes[2]},expected=401)
+c=login(new)
+new['token']=call('auth/mfa/challenge','POST',{'challengeToken':c['challengeToken'],'code':code(1)})['token']
 control('rates')
 # MFA followed by forced password change still cannot issue a general session early.
 control('force-password',u['id']); c=login(new)
@@ -151,7 +153,10 @@ assert required['challenge']=='password_change' and 'token' not in required
 call('auth/me',token=required['challengeToken'],expected=401)
 full=call('auth/password/required','POST',{'challengeToken':required['challengeToken'],'newPassword':'MFA-forced-password-123456'})
 new.update(token=full['token'],password='MFA-forced-password-123456')
-rt=reauth(new,'mfa.manage',{'recoveryCode':codes[3]})
+rotated=call('auth/mfa/recovery-codes','POST',{},new['token'],reauth=reauth(new,'mfa.manage',{'recoveryCode':codes[3]}))['recoveryCodes']
+assert len(rotated)==10 and set(rotated).isdisjoint(codes)
+c=login(new); call('auth/mfa/challenge','POST',{'challengeToken':c['challengeToken'],'recoveryCode':codes[4]},expected=401)
+rt=reauth(new,'mfa.manage',{'recoveryCode':rotated[0]})
 call('auth/mfa/disable','POST',{},new['token'],reauth=rt)
 call('auth/me',token=new['token'],expected=401)
 new['token']=login(new)['token']; assert not call('auth/mfa/status',token=new['token'])['enabled']
@@ -168,5 +173,10 @@ call('auth/password/forgot','POST',{'email':'another-absent@example.test'},expec
 control('rates')
 for i in range(10): call('auth/login','POST',{'email':f'absent{i}@example.test','password':'wrong'},expected=401)
 call('auth/login','POST',{'email':'another@example.test','password':'wrong'},expected=429)
+control('rates')
+for i in range(10): call('auth/mfa/challenge','POST',{'challengeToken':'0'*64,'code':'000000'},expected=401)
+call('auth/mfa/challenge','POST',{'challengeToken':'0'*64,'code':'000000'},expected=429)
+log=Path('/tmp/motoapex-test.log').read_text()
+for secret_value in (reset,uri,*codes,*rotated,*[f['password'] for f in fixtures.values()]): assert secret_value not in log
 server.shutdown()
 print('Users, last admin, permissions, revocation, mandatory password, SMTP recovery and MFA passed')

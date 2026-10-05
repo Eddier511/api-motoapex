@@ -60,9 +60,13 @@ function issueChallenge(array $u,string $purpose,?string $mfaTime=null,?string $
 }
 function takeChallenge(string $token,string $purpose,?string $action=null,?string $session=null): array {
     if (!preg_match('/^[a-f0-9]{64}$/D',$token)) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido.',401);
+    $candidate=query('SELECT user_id FROM auth_challenges WHERE token_hash=?',[hash('sha256',$token)])->fetchColumn();
+    if (!$candidate) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido o vencido.',401);
+    // Lock the user before challenges/sessions, matching password changes and revocation.
+    $u=accountRow((string)$candidate,true);
     $c=query('SELECT * FROM auth_challenges WHERE token_hash=? AND purpose=? AND expires_at>UTC_TIMESTAMP() AND used_at IS NULL FOR UPDATE',[hash('sha256',$token),$purpose])->fetch();
     if (!$c || ($purpose==='reauth' && ($c['action']!==$action || (string)$c['session_id']!==$session))) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido o vencido.',401);
-    $u=accountRow((string)$c['user_id'],true);
+    if ($purpose==='reauth' && !query('SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE',[$session,$u['id']])->fetchColumn()) fail('UNAUTHENTICATED','SesiÃ³n revocada.',401);
     if ($u['status']!=='active' || !hash_equals($c['permission_fingerprint'],permissionFingerprint((string)$u['id'])) || !hash_equals($c['password_fingerprint'],hash('sha256',$u['password_hash']))) fail('UNAUTHENTICATED','DesafÃ­o invalidado.',401);
     query('UPDATE auth_challenges SET used_at=UTC_TIMESTAMP() WHERE id=?',[$c['id']]);
     return [$u,$c];
@@ -95,6 +99,7 @@ function totp(string $secret,int $counter,int $digits=6): string {
     return str_pad((string)($number%(10**$digits)),$digits,'0',STR_PAD_LEFT);
 }
 function verifyMfa(string $id,array $a,bool $pending=false): bool {
+    if (isset($a['code'],$a['recoveryCode'])) throw new InvalidArgumentException('Enviar solo code o recoveryCode');
     $m=query('SELECT * FROM user_mfa WHERE user_id=? FOR UPDATE',[$id])->fetch();
     if (!$m || (!$pending && $m['confirmed_at']===null)) return false;
     if (isset($a['recoveryCode']) && !$pending) {
@@ -114,7 +119,7 @@ function recoveryCodes(string $id): array {
 }
 function smtpConfig(): array {
     $s=config()['smtp'] ?? []; $url=config()['password_reset_url'] ?? '';
-    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null) fail('SMTP_NOT_CONFIGURED','RecuperaciÃ³n pendiente: configurar SMTP y URL de recuperaciÃ³n en el servidor.',503);
+    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null || preg_match('/[\x00-\x20\x7f\\\\]/',rawurldecode($url))) fail('SMTP_NOT_CONFIGURED','RecuperaciÃ³n pendiente: configurar SMTP y URL de recuperaciÃ³n en el servidor.',503);
     $localTest=(config()['environment'] ?? '')==='test' && $s['host']==='127.0.0.1';
     if (!$localTest && (!in_array($s['encryption'] ?? '',['tls','ssl'],true) || empty($s['username']) || empty($s['password']))) fail('SMTP_NOT_CONFIGURED','SMTP requiere TLS y credenciales del servidor.',503);
     return $s;

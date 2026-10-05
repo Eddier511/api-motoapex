@@ -82,7 +82,7 @@ function settingsDocument(bool $public): array {
     $out=[];
     foreach (SETTING_RULES as $key=>$rule) {
         if ($public && !$rule['public']) continue;
-        $row=query('SELECT id,value FROM settings WHERE `key`=?',[$key])->fetch(); if (!$row) continue;
+        $row=query('SELECT id,setting_value AS value FROM settings WHERE setting_key=?',[$key])->fetch(); if (!$row) continue;
         try { $value=settingValue($key,$row['value']); } catch (InvalidArgumentException) { continue; }
         $out[]=['id'=>(string)$row['id'],'key'=>$key,'value'=>$value,'valueType'=>$rule['type'],'public'=>$rule['public']];
     }
@@ -95,7 +95,7 @@ function handleSettings(string $scope,string $method,?string $key,?array $user,s
         limit('settings-write',30); if (!isset(SETTING_RULES[$key])) throw new InvalidArgumentException('Clave no editable');
         $a=body(); contentKeys($a,['value']); $value=settingValue($key,$a['value']); $rule=SETTING_RULES[$key];
         db()->beginTransaction(); requireReauth($user,'settings.manage');
-        query('INSERT INTO settings (`key`,value,value_type,is_public,updated_by) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE value=VALUES(value),value_type=VALUES(value_type),is_public=VALUES(is_public),updated_by=VALUES(updated_by)',[$key,$value,$rule['type'],(int)$rule['public'],$user['id']]);
+        query('INSERT INTO settings (setting_key,setting_value,value_type,is_public,updated_by) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),value_type=VALUES(value_type),is_public=VALUES(is_public),updated_by=VALUES(updated_by)',[$key,$value,$rule['type'],(int)$rule['public'],$user['id']]);
         audit('setting_updated_'.$key,$requestId,$user['id']); $result=array_values(array_filter(settingsDocument(false),fn($x)=>$x['key']===$key))[0]; db()->commit(); respond($result);
     }
     fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);

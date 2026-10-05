@@ -14,8 +14,8 @@ function safeContentUrl(array $a,string $key,bool $required=false): string {
 function contentButton(mixed $a): ?array {
     if ($a===null) return null;
     if (!is_array($a) || array_is_list($a)) throw new InvalidArgumentException('BotÃ³n invÃ¡lido');
-    contentKeys($a,['text','href']);
-    return ['text'=>plainPromotionText($a,'text',100,true),'href'=>promotionHref(['buttonHref'=>$a['href']])];
+    contentKeys($a,['label','href']);
+    return ['label'=>plainPromotionText($a,'label',100,true),'href'=>promotionHref(['buttonHref'=>$a['href']])];
 }
 function validateContent(string $kind,array $a): array {
     if ($kind==='pages') {
@@ -51,7 +51,7 @@ function validateContent(string $kind,array $a): array {
         $placement=textField($a,'placement',100,true);
         if (!preg_match('/^[a-z][a-z0-9_-]*$/D',$placement)) throw new InvalidArgumentException('UbicaciÃ³n invÃ¡lida');
         $primary=contentButton($a['ctaPrimary']); $secondary=contentButton($a['ctaSecondary']);
-        return ['title'=>plainPromotionText($a,'title',255,true),'subtitle'=>plainPromotionText($a,'subtitle',3000),'imageUrl'=>safeContentUrl($a,'imageUrl',true),'mobileImageUrl'=>safeContentUrl($a,'mobileImageUrl'),'alt_text'=>plainPromotionText($a,'alt',500,true),'brand_id'=>$a['brandId']===null ? null : promotionId($a['brandId'],'brandId'),'page_id'=>($a['pageId'] ?? null)===null ? null : promotionId($a['pageId'],'pageId'),'accent_color'=>colorField($a,'accentColor'),'button_label'=>$primary['text'] ?? null,'link_url'=>$primary['href'] ?? null,'secondary_button_label'=>$secondary['text'] ?? null,'secondary_link_url'=>$secondary['href'] ?? null,'placement'=>$placement,'sort_order'=>numberField($a,'order',1000000,true),'status'=>choice($a,'status',['active','inactive'],'inactive'),'starts_at'=>$start,'ends_at'=>$end];
+        return ['title'=>plainPromotionText($a,'title',255,true),'subtitle'=>plainPromotionText($a,'subtitle',3000),'imageUrl'=>safeContentUrl($a,'imageUrl',true),'mobileImageUrl'=>safeContentUrl($a,'mobileImageUrl'),'alt_text'=>plainPromotionText($a,'alt',500,true),'brand_id'=>$a['brandId']===null ? null : promotionId($a['brandId'],'brandId'),'page_id'=>($a['pageId'] ?? null)===null ? null : promotionId($a['pageId'],'pageId'),'accent_color'=>colorField($a,'accentColor'),'button_label'=>$primary['label'] ?? null,'link_url'=>$primary['href'] ?? null,'secondary_button_label'=>$secondary['label'] ?? null,'secondary_link_url'=>$secondary['href'] ?? null,'placement'=>$placement,'sort_order'=>numberField($a,'order',1000000,true),'status'=>choice($a,'status',['active','inactive'],'inactive'),'starts_at'=>$start,'ends_at'=>$end];
     }
     if ($kind==='social-links') {
         contentKeys($a,['platform','label','url','order','status']);
@@ -96,7 +96,7 @@ function contentDocument(string $kind,array $row,bool $public): ?array {
         $brand=promotionBrand($row['brand_id'],$public);
         if ($public && $row['brand_id']!==null && !$brand) return null;
         if ($public && $row['page_id']!==null && !query("SELECT id FROM web_pages WHERE id=? AND status='published' AND deleted_at IS NULL",[$row['page_id']])->fetchColumn()) return null;
-        $out+=['title'=>strip_tags($row['title']),'subtitle'=>strip_tags($row['subtitle'] ?? ''),'imageUrl'=>mediaUrl($row['desktop_media_id']),'mobileImageUrl'=>mediaUrl($row['mobile_media_id']),'alt'=>strip_tags($row['alt_text']),'brandId'=>$row['brand_id']===null ? null : (string)$row['brand_id'],'brandSlug'=>$brand['slug'] ?? null,'brand'=>$brand,'pageId'=>$row['page_id']===null ? null : (string)$row['page_id'],'accentColor'=>$row['accent_color'],'ctaPrimary'=>$row['button_label']===null ? null : ['text'=>strip_tags($row['button_label']),'href'=>$row['link_url']],'ctaSecondary'=>$row['secondary_button_label']===null ? null : ['text'=>strip_tags($row['secondary_button_label']),'href'=>$row['secondary_link_url']],'placement'=>$row['placement'],'order'=>(int)$row['sort_order'],'status'=>$row['status'],'startsAt'=>iso($row['starts_at']),'endsAt'=>iso($row['ends_at'])];
+        $out+=['title'=>strip_tags($row['title']),'subtitle'=>strip_tags($row['subtitle'] ?? ''),'imageUrl'=>mediaUrl($row['desktop_media_id']),'mobileImageUrl'=>mediaUrl($row['mobile_media_id']),'alt'=>strip_tags($row['alt_text']),'brandId'=>$row['brand_id']===null ? null : (string)$row['brand_id'],'brandSlug'=>$brand['slug'] ?? null,'brand'=>$brand,'pageId'=>$row['page_id']===null ? null : (string)$row['page_id'],'accentColor'=>$row['accent_color'],'ctaPrimary'=>$row['button_label']===null ? null : ['label'=>strip_tags($row['button_label']),'href'=>$row['link_url']],'ctaSecondary'=>$row['secondary_button_label']===null ? null : ['label'=>strip_tags($row['secondary_button_label']),'href'=>$row['secondary_link_url']],'placement'=>$row['placement'],'order'=>(int)$row['sort_order'],'status'=>$row['status'],'startsAt'=>iso($row['starts_at']),'endsAt'=>iso($row['ends_at'])];
         if ($public) { try { validateContent('banners',array_diff_key($out,array_flip(['id','brandSlug','brand']))); } catch (InvalidArgumentException) { return null; } }
     } elseif ($kind==='social-links') {
         if ($public && $row['status']!=='active') return null;

@@ -113,10 +113,10 @@ PUT reemplaza todos los campos editables del recurso. Se requieren todas las cla
 Banner compatible con HERO_SLIDES (ejemplo ilustrativo **inactivo**, no se importa):
 
 ```json
-{"title":"TÃ­tulo del carrusel","subtitle":"Texto plano","imageUrl":"https://images.example.com/desktop.jpg","mobileImageUrl":"https://images.example.com/mobile.jpg","alt":"DescripciÃ³n de la imagen","brandId":null,"accentColor":"#CC2233","ctaPrimary":{"text":"Ver catÃ¡logo","href":"/catalogo"},"ctaSecondary":{"text":"Consultar","href":"/contacto"},"placement":"home_hero","order":1,"status":"inactive","startsAt":null,"endsAt":null,"pageId":null}
+{"title":"TÃ­tulo del carrusel","subtitle":"Texto plano","imageUrl":"https://images.example.com/desktop.jpg","mobileImageUrl":"https://images.example.com/mobile.jpg","alt":"DescripciÃ³n de la imagen","brandId":null,"accentColor":"#CC2233","ctaPrimary":{"label":"Ver catÃ¡logo","href":"/catalogo"},"ctaSecondary":{"label":"Consultar","href":"/contacto"},"placement":"home_hero","order":1,"status":"inactive","startsAt":null,"endsAt":null,"pageId":null}
 ```
 
-La respuesta aÃ±ade id como cadena, brandSlug y brand `{id,name,slug,primaryColor}` o null. `imageUrl`, `mobileImageUrl`, `ctaPrimary`, `ctaSecondary`, `brandSlug`, `accentColor`, title y subtitle pueden mapearse directamente a HERO_SLIDES. Un botÃ³n ausente se envÃ­a como null; un botÃ³n presente exige text y href. `mobileImageUrl` vacÃ­o permite fallback a escritorio. GET pÃºblico admite `?placement=home_hero` y ordena por order e id. Solo banners activos y vigentes segÃºn UTC de MySQL; lÃ­mites opcionales inclusivos. Una marca inactiva o pÃ¡gina relacionada no publicada oculta el banner. Sin marca ni pÃ¡gina se permite un banner general.
+La respuesta aÃ±ade id como cadena, brandSlug y brand `{id,name,slug,primaryColor}` o null. `imageUrl`, `mobileImageUrl`, `ctaPrimary`, `ctaSecondary`, `brandSlug`, `accentColor`, title y subtitle pueden mapearse directamente a HERO_SLIDES. Un botÃ³n ausente se envÃ­a como null; un botÃ³n presente exige label y href. `mobileImageUrl` vacÃ­o permite fallback a escritorio. GET pÃºblico admite `?placement=home_hero` y ordena por order e id. Solo banners activos y vigentes segÃºn UTC de MySQL; lÃ­mites opcionales inclusivos. Una marca inactiva o pÃ¡gina relacionada no publicada oculta el banner. Sin marca ni pÃ¡gina se permite un banner general.
 
 PÃ¡gina:
 
