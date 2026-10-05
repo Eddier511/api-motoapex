@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-$c=['db_host'=>'127.0.0.1','db_port'=>3306,'db_name'=>'motoapex_test','db_user'=>'root','db_password'=>'test-only-password','allowed_origins'=>['https://admin.example.test'],'token_lifetime'=>3600];
+$c=['db_host'=>'127.0.0.1','db_port'=>3306,'db_name'=>'motoapex_test','db_user'=>'root','db_password'=>'test-only-password','allowed_origins'=>['https://admin.example.test'],'token_lifetime'=>3600,'environment'=>'test','mfa_encryption_key'=>base64_encode(random_bytes(32)),'password_reset_url'=>'https://admin.example.test/reset-password','smtp'=>['host'=>'127.0.0.1','port'=>8025,'from'=>'noreply@example.test','encryption'=>'']];
 file_put_contents(dirname(__DIR__).'/config.local.php',"<?php\nreturn ".var_export($c,true).";\n");
 require dirname(__DIR__).'/src/bootstrap.php';
 // Remove SQL line comments before splitting statements (comments can contain semicolons).
@@ -17,5 +17,6 @@ foreach (explode(';',$schema) as $statement) {
 db()->exec(file_get_contents(dirname(__DIR__).'/database/002_api_support.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/003_promotions.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/004_web_content.sql'));
+db()->exec(file_get_contents(dirname(__DIR__).'/database/005_accounts.sql'));
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Test','admin@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'admin']);
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Sales','sales@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'sales']);

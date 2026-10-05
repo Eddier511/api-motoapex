@@ -11,10 +11,10 @@ function config(): array {
     return $config;
 }
 
-function audit(string $event, string $requestId, ?string $userId = null): void {
+function audit(string $event, string $requestId, ?string $userId = null, string $entityType='api', ?string $entityId=null): void {
     // Do not log credentials, bearer tokens, request bodies or lead contact details.
     error_log(json_encode(['service'=>'motoapex','event'=>$event,'requestId'=>$requestId,'userId'=>$userId,'time'=>gmdate('c')], JSON_THROW_ON_ERROR));
-    query('INSERT INTO audit_logs (actor_id,action,entity_type,request_id) VALUES (?,?,?,?)',[$userId,$event,'api',$requestId]);
+    query('INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,request_id) VALUES (?,?,?,?,?)',[$userId,$event,$entityType,$entityId,$requestId]);
 }
 
 function db(): PDO {
@@ -75,17 +75,7 @@ function limit(string $action, int $maximum): void {
     query('DELETE FROM rate_limits WHERE expires_at < UTC_TIMESTAMP() LIMIT 100');
 }
 
-function identity(): array {
-    $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-    if (!preg_match('/^Bearer ([a-f0-9]{64})$/', $auth, $m)) fail('UNAUTHENTICATED', 'Inicia sesión.', 401);
-    $u = query('SELECT u.id,u.name,u.email,u.status,u.last_access_at AS lastAccess,r.code AS role,u.must_change_password FROM user_sessions s JOIN users u ON u.id=s.user_id JOIN roles r ON r.id=u.role_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP() AND s.revoked_at IS NULL AND u.status=\'active\' AND u.deleted_at IS NULL', [hash('sha256', $m[1])])->fetch();
-    if (!$u) fail('UNAUTHENTICATED', 'Sesión inválida o vencida.', 401);
-    if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) fail('MFA_REQUIRED','Se requiere validar MFA.',403);
-    unset($u['password_hash']);
-    $u['id']=(string)$u['id'];
-    if ($u['must_change_password']) fail('PASSWORD_CHANGE_REQUIRED','Solicita al administrador restablecer tu contraseña antes de continuar.',403);
-    return $u;
-}
+function identity(): array { return accountIdentity(); }
 
 function authorize(array $user, array $roles): void {
     if (!in_array($user['role'], $roles, true)) fail('FORBIDDEN', 'No tienes permisos.', 403);

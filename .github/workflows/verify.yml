@@ -22,14 +22,14 @@ jobs:
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
-          extensions: pdo_mysql
+          extensions: pdo_mysql, sodium
           coverage: none
       - name: PHP syntax
         run: find . -name '*.php' -not -name config.local.php -print0 | xargs -0 -n1 php -l
       - name: Integration tests
         run: |
           php tests/setup.php
-          php -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
+          PHP_CLI_SERVER_WORKERS=4 php -d opcache.enable=0 -d opcache.enable_cli=0 -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
           python3 tests/integration.py
           php tests/promotions_fixture.php
@@ -37,6 +37,9 @@ jobs:
           php tests/promotions_assert.php
           python3 tests/content.py
           php tests/content_assert.php
+          php tests/accounts_fixture.php
+          python3 tests/accounts.py
+          php tests/accounts_assert.php
       - name: Package without credentials
         run: |
           python3 bin/package-hostinger.py --output api-motoapex-hostinger.zip

@@ -114,3 +114,10 @@ function deleteResource(string $kind, string $id): void {
 function leadDocument(array $r): array {
     return ['id'=>(string)$r['id'],'date'=>iso($r['created_at']),'name'=>$r['name'],'phone'=>$r['phone'],'email'=>$r['email'],'brand'=>$r['brand_snapshot'],'motorcycle'=>$r['motorcycle_snapshot'],'motorcycleId'=>$r['motorcycle_id']===null ? '' : (string)$r['motorcycle_id'],'type'=>$r['type'],'status'=>$r['status'],'message'=>$r['message'],'assignedTo'=>$r['assigned_to']===null ? null : (string)$r['assigned_to'],'notes'=>array_map(fn($n)=>['note'=>$n['note'],'date'=>iso($n['created_at'])],query('SELECT note,created_at FROM lead_notes WHERE lead_id=? ORDER BY id',[$r['id']])->fetchAll())];
 }
+
+function brandSummary(mixed $id, bool $public): ?array {
+    if ($id===null) return null;
+    $row=query('SELECT id,name,slug,primary_color,status,deleted_at FROM brands WHERE id=?',[$id])->fetch();
+    if (!$row || ($public && ($row['deleted_at']!==null || $row['status']!=='active'))) return null;
+    return ['id'=>(string)$row['id'],'name'=>$row['name'],'slug'=>$row['slug'],'primaryColor'=>$row['primary_color']];
+}
