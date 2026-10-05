@@ -35,6 +35,15 @@ call('admin/motorcycles/'+moto['id'],'PUT',payload,token)
 public = call('public/motorcycles')[0]
 assert 'price' not in public and 'promoPrice' not in public and 'inventory' not in public and 'sku' not in public
 assert public['brandName'] == 'KTM' and public['model'] == 'Duke'
+payload['showPrice'] = True
+payload['inventory'] = 3
+saved = call('admin/motorcycles/'+moto['id'],'PUT',payload,token)
+assert saved['inventory'] == 3
+assert call('public/motorcycles')[0]['price'] == 10000
+call('admin/brands', 'POST', {'name':'Duplicate','slug':'ktm'}, token, 409)
+payload['colors'] = [{'id':'new-color','name':'Orange','hex':'#FF6600','images':[{'id':'new-image','url':'javascript:alert(1)'}]}]
+call('admin/motorcycles/'+moto['id'],'PUT',payload,token,422)
+payload['colors'] = []
 call('admin/brands/'+brand['id'],'DELETE',token=token,expected=409)
 payload['published'] = 'false'
 call('admin/motorcycles/'+moto['id'],'PUT',payload,token,422)

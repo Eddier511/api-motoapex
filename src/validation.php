@@ -39,7 +39,7 @@ function listField(array $a, string $key, int $max): array {
 }
 function validateResource(string $kind, array $a): array {
     $slug = textField($a, 'slug', 190, true);
-    if (!preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/D', $slug)) throw new InvalidArgumentException('Slug inválido');
+    if (!preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/D', $slug) || ctype_digit($slug)) throw new InvalidArgumentException('Slug inválido');
     $out = ['slug'=>$slug];
     if ($kind !== 'motorcycles') {
         $out += ['name'=>textField($a,'name',120,true),'description'=>textField($a,'description',10000),'status'=>choice($a,'status',['active','inactive'],'inactive'),'order'=>numberField($a,'order',10000,true)];
