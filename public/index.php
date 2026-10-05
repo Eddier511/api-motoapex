@@ -7,6 +7,8 @@ require dirname(__DIR__).'/src/validation.php';
 require dirname(__DIR__).'/src/repository.php';
 require dirname(__DIR__).'/src/promotions.php';
 require dirname(__DIR__).'/src/content.php';
+require dirname(__DIR__).'/src/accounts.php';
+require dirname(__DIR__).'/src/users_settings.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -22,7 +24,7 @@ try {
         if (!in_array($origin,config()['allowed_origins'],true)) fail('ORIGIN_DENIED','Origen no permitido.',403);
         header('Access-Control-Allow-Origin: '.$origin);
         header('Vary: Origin');
-        header('Access-Control-Allow-Headers: Authorization, Content-Type');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Reauth-Token');
         header('Access-Control-Expose-Headers: X-Request-ID, Retry-After');
         header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
     }
@@ -35,36 +37,7 @@ try {
     if (($path[0] ?? '')!=='v1') fail('NOT_FOUND','Ruta no encontrada.',404);
     array_shift($path);
     if ($path===['health'] && $method==='GET') { query('SELECT 1'); respond(['status'=>'ok']); }
-    if ($path===['auth','login'] && $method==='POST') {
-        limit('login',10);
-        $a=body(); $email=textField($a,'email',190,true); $password=$a['password'] ?? '';
-        if (!is_string($password) || strlen($password)<1 || strlen($password)>72) throw new InvalidArgumentException('ContraseÃ±a invÃ¡lida');
-        $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE u.email=? AND u.deleted_at IS NULL',[strtolower($email)])->fetch();
-        $hash=$u['password_hash'] ?? '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi';
-        $valid=password_verify($password,$hash);
-        $blocked=$u && $u['locked_until'] && strtotime($u['locked_until'].' UTC')>time();
-        query('INSERT INTO login_attempts (email,user_id,ip_address,succeeded) VALUES (?,?,?,?)',[strtolower($email),$u['id'] ?? null,$_SERVER['REMOTE_ADDR'] ?? null,(int)($u && $valid && !$blocked && $u['status']==='active')]);
-        if (!$u || !$valid || $blocked || $u['status']!=='active') {
-            if ($u && !$blocked) query('UPDATE users SET failed_login_attempts=failed_login_attempts+1,locked_until=CASE WHEN failed_login_attempts>=10 THEN DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE) ELSE NULL END WHERE id=?',[$u['id']]);
-            audit('login_failed',$requestId);
-            fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401);
-        }
-        if ($u['must_change_password']) fail('PASSWORD_CHANGE_REQUIRED','Solicita restablecer tu contraseÃ±a.',403);
-        // Fail closed for accounts with MFA configured until the challenge flow is implemented.
-        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) fail('MFA_REQUIRED','Esta cuenta requiere un flujo MFA aÃºn no disponible.',403);
-        if (password_needs_rehash($u['password_hash'],PASSWORD_DEFAULT)) query('UPDATE users SET password_hash=? WHERE id=?',[password_hash($password,PASSWORD_DEFAULT),$u['id']]);
-        $token=bin2hex(random_bytes(32)); $expires=gmdate('Y-m-d H:i:s',time()+(int)config()['token_lifetime']);
-        query('INSERT INTO user_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)',[hash('sha256',$token),$u['id'],$expires]);
-        query('UPDATE users SET last_access_at=UTC_TIMESTAMP(),failed_login_attempts=0,locked_until=NULL WHERE id=?',[$u['id']]);
-        $u=['id'=>(string)$u['id'],'name'=>$u['name'],'email'=>$u['email'],'role'=>$u['role'],'status'=>$u['status'],'lastAccess'=>gmdate('c')]; audit('login_success',$requestId,$u['id']);
-        respond(['token'=>$token,'expiresAt'=>str_replace(' ','T',$expires).'Z','user'=>$u]);
-    }
-    if ($path===['auth','me'] && $method==='GET') respond(identity());
-    if ($path===['auth','logout'] && $method==='POST') {
-        $u=identity(); $auth=$_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-        query('UPDATE user_sessions SET revoked_at=UTC_TIMESTAMP() WHERE token_hash=?',[hash('sha256',substr($auth,7))]);
-        audit('logout',$requestId,$u['id']); respond(['loggedOut'=>true]);
-    }
+    handleAuth($path,$method,$requestId);
     if ($path===['public','leads'] && $method==='POST') {
         limit('lead',5); $a=body();
         $out=['status'=>'new'];
@@ -88,6 +61,13 @@ try {
     $scope=$path[0] ?? ''; $kind=$path[1] ?? ''; $id=$path[2] ?? null;
     if (count($path)>3 || !in_array($scope,['admin','public'],true)) fail('NOT_FOUND','Ruta no encontrada.',404);
     $user=$scope==='admin' ? identity() : null;
+    if ($scope==='admin' && $kind==='lead-assignees' && $method==='GET' && $id===null) {
+        permit($user,'leads.manage'); limit('lead-assignees',150);
+        $rows=query("SELECT u.id,u.name FROM users u JOIN roles r ON r.id=u.role_id WHERE u.status='active' AND u.deleted_at IS NULL AND r.code IN ('admin','sales') ORDER BY u.name,u.id")->fetchAll();
+        respond(array_map(fn($r)=>['id'=>(string)$r['id'],'name'=>$r['name']],$rows));
+    }
+    if ($scope==='admin' && in_array($kind,['users','roles'],true)) handleUsers($kind,$method,$id,$user,$requestId);
+    if ($kind==='settings') handleSettings($scope,$method,$id,$user,$requestId);
     if (isset(CONTENT_TABLES[$kind])) handleContent($scope,$kind,$method,$id,$user,$requestId);
     if ($kind==='promotions') handlePromotions($scope,$method,$id,$user,$requestId);
     if ($kind==='leads' && $scope==='admin') {

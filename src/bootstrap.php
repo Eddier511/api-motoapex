@@ -57,9 +57,9 @@ function metric(int $status): void {
 
 function body(): array {
     $raw = file_get_contents('php://input', false, null, 0, 262145);
-    if (strlen($raw) > 262144) fail('PAYLOAD_TOO_LARGE', 'Máximo 256 KiB.', 413);
+    if (strlen($raw) > 262144) fail('PAYLOAD_TOO_LARGE', 'MÃ¡ximo 256 KiB.', 413);
     try { $data = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); }
-    catch (JsonException) { fail('INVALID_JSON', 'JSON inválido.', 400); }
+    catch (JsonException) { fail('INVALID_JSON', 'JSON invÃ¡lido.', 400); }
     if (!is_array($data) || !str_starts_with(ltrim($raw), '{')) fail('INVALID_JSON', 'Se requiere un objeto JSON.', 400);
     return $data;
 }
@@ -70,22 +70,12 @@ function limit(string $action, int $maximum): void {
     query('INSERT INTO rate_limits (bucket,hits,expires_at) VALUES (?,1,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE)) ON DUPLICATE KEY UPDATE hits=hits+1', [$bucket]);
     if ((int) query('SELECT hits FROM rate_limits WHERE bucket=?', [$bucket])->fetchColumn() > $maximum) {
         header('Retry-After: 900');
-        fail('RATE_LIMITED', 'Demasiados intentos. Intenta más tarde.', 429);
+        fail('RATE_LIMITED', 'Demasiados intentos. Intenta mÃ¡s tarde.', 429);
     }
     query('DELETE FROM rate_limits WHERE expires_at < UTC_TIMESTAMP() LIMIT 100');
 }
 
-function identity(): array {
-    $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-    if (!preg_match('/^Bearer ([a-f0-9]{64})$/', $auth, $m)) fail('UNAUTHENTICATED', 'Inicia sesión.', 401);
-    $u = query('SELECT u.id,u.name,u.email,u.status,u.last_access_at AS lastAccess,r.code AS role,u.must_change_password FROM user_sessions s JOIN users u ON u.id=s.user_id JOIN roles r ON r.id=u.role_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP() AND s.revoked_at IS NULL AND u.status=\'active\' AND u.deleted_at IS NULL', [hash('sha256', $m[1])])->fetch();
-    if (!$u) fail('UNAUTHENTICATED', 'Sesión inválida o vencida.', 401);
-    if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) fail('MFA_REQUIRED','Se requiere validar MFA.',403);
-    unset($u['password_hash']);
-    $u['id']=(string)$u['id'];
-    if ($u['must_change_password']) fail('PASSWORD_CHANGE_REQUIRED','Solicita al administrador restablecer tu contraseña antes de continuar.',403);
-    return $u;
-}
+function identity(): array { return accountIdentity(); }
 
 function authorize(array $user, array $roles): void {
     if (!in_array($user['role'], $roles, true)) fail('FORBIDDEN', 'No tienes permisos.', 403);

@@ -32,7 +32,7 @@ instructions = '''INSTALACION API MOTOAPEX
 
 3. Como el esquema inicial ya esta importado, verifica schema_migrations.
    Aplica 002_api_support.sql SOLO si no esta aplicada y despues
-   003_promotions.sql y 004_web_content.sql, una sola vez, despues de un respaldo.
+   003_promotions.sql, 004_web_content.sql y 005_accounts.sql, una sola vez, despues de un respaldo.
    No vuelvas a importar schema.sql. No borres tablas para instalar la API.
 
 4. El document root debe ser public_html. Reemplaza su .htaccess por el
@@ -63,21 +63,21 @@ instructions = '''INSTALACION API MOTOAPEX
    VITE_API_BASE_URL=https://api.motoapexcr.com/v1
 
 Consulta docs/contract.md para rutas y campos. El paquete es la primera version:
-MFA, recuperacion de contrasena y gestion de usuarios
-aun no tienen flujos completos. Las imagenes se guardan como enlaces HTTPS.
+Configura SMTP, URL de recuperacion y clave MFA solo en config.local.php.
+005 revoca sesiones anteriores. No incluye credenciales ni secretos. Las imagenes se guardan como enlaces HTTPS.
 '''
 
 files = {}
-for directory in ('public', 'src'):
+for directory in ('public', 'src', 'vendor'):
     for file in (root / directory).rglob('*'):
         if file.is_file():
             path = file.relative_to(root).as_posix()
             if directory == 'public':
                 path = 'public_html/' + file.relative_to(root / 'public').as_posix()
             files[path] = file.read_bytes()
-for path in ('bin/create-admin.php', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql',
+for path in ('bin/create-admin.php', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql',
              'config.example.php', 'README.md', 'docs/contract.md',
-             'docs/integration-prompts.md', 'docs/hosting-403.md'):
+             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/accounts-install.md'):
     files[path] = (root / path).read_bytes()
 files['LEEME-INSTALACION.txt'] = instructions.encode('utf-8')
 files['deployment-manifest.json'] = json.dumps({

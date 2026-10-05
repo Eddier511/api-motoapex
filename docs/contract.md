@@ -143,3 +143,88 @@ Red social:
 Plataformas facebook, instagram, tiktok, youtube, x, linkedin, whatsapp, other. PÃºblico solo active, orden por order/id. ImÃ¡genes y redes exigen HTTPS sin credenciales; botones y enlaces de bloque admiten una ruta interna `/...` o HTTPS, nunca `//`, backslash, controles, javascript:, data: u otros esquemas. Color #RRGGBB. Fechas ISO 8601 con segundos y zona; relaciones se comprueban en el servidor. La API almacena enlaces, no descarga imÃ¡genes.
 
 InstalaciÃ³n: aplicar 004_web_content.sql una sola vez despuÃ©s de 003. No reimportar schema.sql ni publicar contenido del frontend automÃ¡ticamente. Las rutas serÃ¡n idÃ©nticas al migrar la base a https://api.motoapexcr.com/v1; actualizar configuraciÃ³n de frontends y orÃ­genes del servidor de forma coordinada.
+
+## Usuarios, ConfiguraciÃ³n, Cuenta y MFA (migraciÃ³n 005)
+
+El contrato siguiente reemplaza el bloqueo provisional de MFA/cambio obligatorio de la base inicial. Todas las rutas tienen prefijo `/v1`. IDs como cadenas; envoltorios `{data:...}`/`{error:{code,message}}`, X-Request-ID y errores 401, 403, 409, 422, 429. SMTP/cifrado pendientes: 503 explÃ­cito. Bearer, challengeToken y reauthToken deben mantenerse Ãºnicamente en memoria. Nunca son intercambiables: un challengeToken no autoriza rutas admin.
+
+| MÃ©todo y ruta | Permiso / propÃ³sito |
+|---|---|
+| GET /admin/users | users.manage, lista sin eliminados |
+| GET /admin/users/{id} | users.manage, detalle |
+| POST /admin/users | users.manage + reautenticaciÃ³n users.manage |
+| PUT /admin/users/{id} | users.manage + reautenticaciÃ³n users.manage |
+| DELETE /admin/users/{id} | users.manage + reautenticaciÃ³n users.manage, eliminaciÃ³n lÃ³gica |
+| GET /admin/roles | users.manage, roles y permisos de referencia; sin ediciÃ³n |
+| GET /admin/lead-assignees | leads.manage, exclusivamente id y name de usuarios activos admin/sales |
+| GET /admin/settings | settings.manage, solo claves permitidas |
+| PUT /admin/settings/{key} | settings.manage + reautenticaciÃ³n settings.manage |
+| GET /public/settings | ajustes pÃºblicos de la lista explÃ­cita |
+| GET /auth/me, GET /auth/profile | perfil propio, sesiÃ³n completa |
+| PUT /auth/profile | sesiÃ³n completa + reautenticaciÃ³n profile.edit |
+| POST /auth/login | contraseÃ±a, despuÃ©s MFA/cambio obligatorio si corresponde |
+| POST /auth/logout | revoca sesiÃ³n actual |
+| POST /auth/reauth | contraseÃ±a actual y MFA si estÃ¡ activo; permiso sensible sigue comprobÃ¡ndose en la operaciÃ³n |
+| POST /auth/password/change | sesiÃ³n completa + reautenticaciÃ³n password.change + contraseÃ±a actual |
+| POST /auth/password/required | challengeToken limitado de cambio obligatorio |
+| POST /auth/password/forgot | solicitud genÃ©rica de recuperaciÃ³n SMTP |
+| POST /auth/password/reset | enlace de recuperaciÃ³n, no emite sesiÃ³n |
+| GET /auth/mfa/status | estado enabled, sesiÃ³n completa |
+| POST /auth/mfa/enroll | sesiÃ³n completa + reautenticaciÃ³n mfa.manage |
+| POST /auth/mfa/confirm | sesiÃ³n completa + reautenticaciÃ³n mfa.manage y cÃ³digo de alta |
+| POST /auth/mfa/challenge | challengeToken limitado de login y code o recoveryCode |
+| POST /auth/mfa/disable | sesiÃ³n completa + reautenticaciÃ³n mfa.manage |
+| POST /auth/mfa/recovery-codes | sesiÃ³n completa + reautenticaciÃ³n mfa.manage, rota cÃ³digos |
+
+Roles iniciales: users.manage/settings.manage Ãºnicamente admin; leads.manage admin/sales. No se permite escalada mediante role_id, permisos, isAdmin u otros campos arbitrarios. El rol se resuelve exclusivamente por code existente en roles; un rol delegado con users.manage no puede asignar admin ni un rol con permisos que no posee. roles.manage no habilita una ruta de ediciÃ³n en esta versiÃ³n. Se rechazan modificaciones que desactiven, eliminen o cambien el rol del Ãºltimo administrador activo, con 409 LAST_ADMIN y bloqueo transaccional para serializar cambios concurrentes. No hay borrado fÃ­sico de usuarios.
+
+CreaciÃ³n de usuario (POST, requiere contraseÃ±a explÃ­cita; ejemplo no se importa):
+
+```json
+{"name":"Persona","email":"persona@example.com","phone":"+506 8888-8888","avatarUrl":"https://images.example.com/avatar.jpg","role":"sales","status":"active","password":"CONTRASEÃ‘A_PROPIA_DE_16_A_72_BYTES"}
+```
+
+PUT reemplaza name, email, phone, avatarUrl, role y status, requeridos incluso si telÃ©fono/avatar estÃ¡n vacÃ­os. No requiere password; `newPassword` opcional impone un cambio obligatorio y revoca sesiones. `mustChangePassword:true` opcional permite imponer ese cambio; false se rechaza porque solo el usuario puede completarlo. Correo Ãºnico normalizado a minÃºsculas, conflicto 409 incluso si pertenece a una cuenta eliminada. Respuestas de usuario: `{id,name,email,phone,avatarUrl,role,status,lastAccess,mustChangePassword}`. No devuelven hashes, secretos MFA, tokens de sesiones ni cÃ³digos de recuperaciÃ³n. DesactivaciÃ³n, eliminaciÃ³n, cambio de rol/correo/contraseÃ±a o imposiciÃ³n de cambio obligatorio revocan sesiones y desafÃ­os y anulan enlaces de recuperaciÃ³n. La huella de permisos de cada sesiÃ³n detecta cambios de role_permissions al siguiente acceso y revoca todas las sesiones de esa cuenta. La migraciÃ³n 005 revoca sesiones antiguas sin huella.
+
+Perfil propio PUT acepta exclusivamente name, email, phone y avatarUrl. No acepta estado, rol, contraseÃ±a ni permisos. Cambio de correo requiere reautenticaciÃ³n y revoca sesiones. La contraseÃ±a cambia mediante su ruta separada.
+
+Ajustes permitidos (PUT body `{ "value": "USD" }`):
+
+| key | ValidaciÃ³n | PÃºblico |
+|---|---|---|
+| site_url | HTTPS sin credenciales | sÃ­ |
+| admin_url | HTTPS sin credenciales | no |
+| api_url | HTTPS sin credenciales | no |
+| timezone | identificador IANA reconocido por PHP | sÃ­ |
+| default_currency | CRC o USD | sÃ­ |
+
+GET settings devuelve una lista `{id,key,value,valueType:"string",public:boolean}`. La visibilidad se define en cÃ³digo, no por un flag enviado por cliente o por registros arbitrarios de settings. No admite nuevas claves, secretos, credenciales MySQL, SMTP, CORS o variables del servidor. Estos URLs informativos no reconfiguran el servidor. Contacto, horarios, logos, favicon y redes usan exclusivamente Contenido web, evitando duplicaciÃ³n.
+
+### Login y cambio obligatorio
+
+POST /auth/login `{email,password}` conserva, para cuentas sin requisitos pendientes, `{data:{token,expiresAt,user}}`. Si MFA estÃ¡ activo devuelve `{data:{challenge:"mfa_login",challengeToken,expiresAt}}`, sin token de sesiÃ³n ni datos privados. Si solo requiere cambio de contraseÃ±a devuelve `{data:{challenge:"password_change",challengeToken,expiresAt}}`. DesafÃ­os vencen a los 5 minutos, se almacenan como hash, se vinculan a contraseÃ±a y permisos vigentes y son de un solo uso. No conceden acceso general.
+
+Para mfa_login: POST /auth/mfa/challenge `{challengeToken,code:"123456"}` o `{challengeToken,recoveryCode:"..."}`. Nunca enviar ambos. Respuesta de Ã©xito: sesiÃ³n completa, o desafÃ­o password_change si aÃºn debe cambiar contraseÃ±a. Un cÃ³digo incorrecto consume ese desafÃ­o: volver al login, sujeto a lÃ­mites. Para password_change: POST /auth/password/required `{challengeToken,newPassword}`. Requiere nueva contraseÃ±a de 16â€“72 bytes, diferente de la anterior. Completa must_change_password, revoca sesiones/enlaces previos y emite una sesiÃ³n completa; si MFA estÃ¡ activo, el desafÃ­o debe proceder del MFA ya validado. No hay modo de evitar MFA mediante cambio obligatorio.
+
+POST /auth/password/change `{currentPassword,newPassword}` exige contraseÃ±a actual y X-Reauth-Token vÃ¡lido para password.change. Devuelve `{data:{changed:true,loginRequired:true}}`, revocando todas las sesiones. Volver al login. RecuperaciÃ³n por correo mantiene MFA habilitado y tambiÃ©n obliga a pasar MFA en el siguiente login.
+
+### ReautenticaciÃ³n sensible
+
+POST /auth/reauth `{password,action}` donde action es users.manage, settings.manage, profile.edit, password.change o mfa.manage. Si MFA estÃ¡ activo aÃ±adir `code` o `recoveryCode`. Devuelve `{data:{reauthToken,challenge:"reauth",expiresAt}}`. Enviar ese token en `X-Reauth-Token` junto al Bearer en una Ãºnica operaciÃ³n del propÃ³sito solicitado. CORS permite este encabezado. Vence a los 5 minutos y estÃ¡ vinculado al usuario y a la sesiÃ³n actual. No concede permisos por sÃ­ mismo; la operaciÃ³n comprueba su permiso en el servidor. No reutilizar despuÃ©s de un Ã©xito. Validaciones/transacciones fallidas no consumen un token confirmado Ãºnicamente dentro de la transacciÃ³n que fue revertida.
+
+### RecuperaciÃ³n SMTP
+
+POST /auth/password/forgot `{email}` devuelve siempre el mismo cuerpo para correos activos/inexistentes/inactivos: `{data:{message:"Si existe una cuenta activa, recibirÃ¡s un enlace de recuperaciÃ³n."}}`. No devuelve el token. Un correo activo recibe un enlace HTTPS con fragmento `#token=...`, vÃ¡lido 30 minutos, con token de 256 bits almacenado solo como SHA-256. Una solicitud nueva invalida enlaces anteriores. POST /auth/password/reset `{token,newPassword}` verifica vencimiento/un solo uso/estado activo, cambia contraseÃ±a y revoca sesiones/desafÃ­os/enlaces. Devuelve `{data:{changed:true,loginRequired:true}}`; un enlace invÃ¡lido, usado o vencido responde 401 INVALID_RESET. No crea sesiÃ³n ni elimina MFA.
+
+Sin SMTP correctamente configurado todas las solicitudes reciben 503 SMTP_NOT_CONFIGURED. No se simula entrega. SMTP y URL de recuperaciÃ³n se configuran Ãºnicamente en config.local.php del servidor; instalaciÃ³n, TLS, remitente y pruebas reales pendientes se detallan en docs/accounts-install.md. El mensaje SMTP nunca se registra en logs. El frontend debe leer/eliminar el fragmento, conservar token en memoria y no enviarlo a analytics.
+
+### MFA TOTP
+
+1. Reautenticar con action mfa.manage y llamar POST /auth/mfa/enroll. Devuelve solamente `otpauthUri` para configurar el autenticador. Es la Ãºnica respuesta de aprovisionamiento que contiene el secreto, protegida por sesiÃ³n y contraseÃ±a reciente: mostrar QR local, no enviarlo a servicios externos, logs o almacenamiento persistente. Los GET de perfil/usuarios nunca exponen ese secreto.
+2. Reautenticar de nuevo y POST /auth/mfa/confirm `{code}`. El secreto se almacena cifrado con Sodium secretbox y clave de 32 bytes externa a MySQL. TOTP RFC 6238 SHA-1, 6 dÃ­gitos/30 segundos, ventana Â±1 paso y contador antirrepeticiÃ³n. La confirmaciÃ³n activa MFA, revoca sesiones y entrega 10 recoveryCodes aleatorios una sola vez; mostrar para que el usuario los guarde de forma privada y volver al login.
+3. Login entrega mfa_login; superarlo con un cÃ³digo o cÃ³digo de recuperaciÃ³n. Cada recoveryCode se almacena solo como hash y se consume una vez. Los cÃ³digos TOTP ya usados no pueden reutilizarse, incluso para reautenticar en el mismo intervalo: esperar al prÃ³ximo cÃ³digo o usar uno de recuperaciÃ³n.
+4. POST /auth/mfa/recovery-codes, con reautenticaciÃ³n MFA, invalida cÃ³digos anteriores y entrega nuevos una vez. POST /auth/mfa/disable exige reautenticaciÃ³n de contraseÃ±a + MFA/recuperaciÃ³n, elimina secreto/cÃ³digos y revoca todas las sesiones. Devuelve enabled:false y loginRequired:true.
+
+No se emite sesiÃ³n completa antes de MFA. Login de cuentas sin MFA permanece compatible. Secretos MFA anteriores que no estÃ©n cifrados en este formato deben recuperarse mediante mantenimiento privado autorizado; no hay fallback a texto plano ni bypass. Falta de Sodium/clave produce 503 MFA_NOT_CONFIGURED en las operaciones que requieren cifrado.
+
+LÃ­mites por IP/15 minutos: login 10, MFA login/confirm 10, recuperaciÃ³n 5, reset/cambio obligatorio/cambio propio 10, reauth 10, alta/desactivaciÃ³n/rotaciÃ³n MFA 5, usuarios lectura 150/escritura 40, ajustes lectura 150/escritura 30. AdemÃ¡s buckets independientes de IP: login por correo 8, MFA login por cuenta 8, recuperaciÃ³n por correo 3 y reauth por cuenta 8. Bloqueo temporal del usuario despuÃ©s de fallos de contraseÃ±a. 429 incluye Retry-After:900 expuesto por CORS. AuditorÃ­a registra acciones y actor/request ID, nunca contraseÃ±as, tokens, secretos o cuerpos de correo. InstalaciÃ³n final y SMTP real en Hostinger necesitan validaciÃ³n posterior autorizada.
