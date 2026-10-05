@@ -11,10 +11,10 @@ function config(): array {
     return $config;
 }
 
-function audit(string $event, string $requestId, ?string $userId = null): void {
+function audit(string $event, string $requestId, ?string $userId = null, string $entityType='api', ?string $entityId=null): void {
     // Do not log credentials, bearer tokens, request bodies or lead contact details.
     error_log(json_encode(['service'=>'motoapex','event'=>$event,'requestId'=>$requestId,'userId'=>$userId,'time'=>gmdate('c')], JSON_THROW_ON_ERROR));
-    query('INSERT INTO audit_logs (actor_id,action,entity_type,request_id) VALUES (?,?,?,?)',[$userId,$event,'api',$requestId]);
+    query('INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,request_id) VALUES (?,?,?,?,?)',[$userId,$event,$entityType,$entityId,$requestId]);
 }
 
 function db(): PDO {
@@ -57,9 +57,9 @@ function metric(int $status): void {
 
 function body(): array {
     $raw = file_get_contents('php://input', false, null, 0, 262145);
-    if (strlen($raw) > 262144) fail('PAYLOAD_TOO_LARGE', 'MÃ¡ximo 256 KiB.', 413);
+    if (strlen($raw) > 262144) fail('PAYLOAD_TOO_LARGE', 'Máximo 256 KiB.', 413);
     try { $data = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); }
-    catch (JsonException) { fail('INVALID_JSON', 'JSON invÃ¡lido.', 400); }
+    catch (JsonException) { fail('INVALID_JSON', 'JSON inválido.', 400); }
     if (!is_array($data) || !str_starts_with(ltrim($raw), '{')) fail('INVALID_JSON', 'Se requiere un objeto JSON.', 400);
     return $data;
 }
@@ -70,7 +70,7 @@ function limit(string $action, int $maximum): void {
     query('INSERT INTO rate_limits (bucket,hits,expires_at) VALUES (?,1,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE)) ON DUPLICATE KEY UPDATE hits=hits+1', [$bucket]);
     if ((int) query('SELECT hits FROM rate_limits WHERE bucket=?', [$bucket])->fetchColumn() > $maximum) {
         header('Retry-After: 900');
-        fail('RATE_LIMITED', 'Demasiados intentos. Intenta mÃ¡s tarde.', 429);
+        fail('RATE_LIMITED', 'Demasiados intentos. Intenta más tarde.', 429);
     }
     query('DELETE FROM rate_limits WHERE expires_at < UTC_TIMESTAMP() LIMIT 100');
 }

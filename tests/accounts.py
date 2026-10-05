@@ -1,5 +1,5 @@
 """Real HTTP/MySQL/TOTP/SMTP flow in disposable CI. Never prints credentials or reset links."""
-import base64, copy, email as mailparser, hashlib, hmac, json, socketserver, struct, subprocess, threading, time
+import concurrent.futures, base64, copy, email as mailparser, hashlib, hmac, json, socketserver, struct, subprocess, threading, time
 from pathlib import Path
 import urllib.request, urllib.error, urllib.parse
 
@@ -167,6 +167,26 @@ control('delegated'); call('auth/me',token=e['token'],expected=401); e['token']=
 call('admin/users','POST',dict(payload,email='escalation@example.test',role='admin'),e['token'],403)
 call('admin/users/'+u['id'],'DELETE',token=a['token'],reauth=reauth(a,'users.manage'))
 call('admin/users/'+u['id'],token=a['token'],expected=404); call('auth/me',token=new['token'],expected=401)
+control('rates')
+# Concurrent self-deactivation: exactly one admin remains active.
+second_payload=dict(payload,email='second-admin@example.test',role='admin')
+second=call('admin/users','POST',second_payload,a['token'],201,reauth(a,'users.manage'))
+f2={'email':second_payload['email'],'password':second_payload['password']}
+c=login(f2)
+f2['password']='Second-admin-password-123456'
+f2['token']=call('auth/password/required','POST',{'challengeToken':c['challengeToken'],'newPassword':f2['password']})['token']
+def deactivate(f,uid):
+    me=call('auth/profile',token=f['token']); values={k:me[k] for k in ('name','email','phone','avatarUrl','role','status')}; values['status']='inactive'
+    rt=reauth(f,'users.manage')
+    req=urllib.request.Request(BASE+'admin/users/'+uid,data=json.dumps(values).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+f['token'],'X-Reauth-Token':rt},method='PUT')
+    try: response=urllib.request.urlopen(req)
+    except urllib.error.HTTPError as error: response=error
+    result=response.read(); assert 'error' in json.loads(result) or 'data' in json.loads(result)
+    return response.status
+with concurrent.futures.ThreadPoolExecutor(2) as pool:
+    statuses=list(pool.map(lambda item:deactivate(*item),[(a,a['id']),(f2,second['id'])]))
+assert sorted(statuses)==[200,409],statuses
+control('rates')
 control('missing-smtp')
 call('auth/password/forgot','POST',{'email':a['email']},expected=503)
 call('auth/password/forgot','POST',{'email':'another-absent@example.test'},expected=503)

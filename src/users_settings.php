@@ -3,10 +3,10 @@ declare(strict_types=1);
 
 function validateUserFields(array $a,bool $admin): array {
     $email=strtolower(textField($a,'email',191,true));
-    if (!filter_var($email,FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Correo invÃ¡lido');
+    if (!filter_var($email,FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Correo inválido');
     $phone=textField($a,'phone',40);
-    if (!preg_match('/^[+0-9 ()-]{0,40}$/D',$phone)) throw new InvalidArgumentException('TelÃ©fono invÃ¡lido');
-    $fields=['name'=>plainPromotionText($a,'name',150,true),'email'=>$email,'phone'=>$phone,'avatar_url'=>safeContentUrl($a,'avatarUrl')];
+    if (!preg_match('/^[+0-9 ()-]{0,40}$/D',$phone)) throw new InvalidArgumentException('Teléfono inválido');
+    $fields=['name'=>plainText($a,'name',150,true),'email'=>$email,'phone'=>$phone,'avatar_url'=>safeContentUrl($a,'avatarUrl')];
     if ($admin) {
         $role=textField($a,'role',60,true);
         $rid=query('SELECT id FROM roles WHERE code=?',[$role])->fetchColumn();
@@ -36,17 +36,17 @@ function handleUsers(string $kind,string $method,?string $id,array $user,string 
         foreach ($roles as &$role) { $role['id']=(string)$role['id']; $role['permissions']=query('SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=? ORDER BY p.code',[$role['id']])->fetchAll(PDO::FETCH_COLUMN); }
         respond($roles);
     }
-    if ($kind!=='users') fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
+    if ($kind!=='users') fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
     if ($method==='GET') {
         limit('users-read',150);
-        if ($id!==null) respond(userDocument(accountRow(promotionId($id,'id'))));
+        if ($id!==null) respond(userDocument(accountRow(entityId($id,'id'))));
         $rows=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE u.deleted_at IS NULL ORDER BY u.name,u.id')->fetchAll();
         respond(array_map('userDocument',$rows));
     }
     limit('users-write',40);
     if (($method==='POST' && $id===null) || ($method==='PUT' && $id!==null)) {
         $a=body(); contentKeys($a,['name','email','phone','avatarUrl','role','status'],$method==='POST' ? ['password'] : ['newPassword','mustChangePassword']);
-        if ($method==='POST' && !array_key_exists('password',$a)) throw new InvalidArgumentException('ContraseÃ±a requerida');
+        if ($method==='POST' && !array_key_exists('password',$a)) throw new InvalidArgumentException('Contraseña requerida');
         $fields=validateUserFields($a,true); ensureRoleAssignable($user,$fields['role_id']);
         $password=isset($a[$method==='POST' ? 'password' : 'newPassword']) ? validPassword($a[$method==='POST' ? 'password' : 'newPassword']) : null;
         $force=isset($a['mustChangePassword']) ? flag($a,'mustChangePassword') : null;
@@ -56,26 +56,26 @@ function handleUsers(string $kind,string $method,?string $id,array $user,string 
         db()->beginTransaction();
         // Serialize all administrative mutations, including simultaneous last-admin demotions.
         query("SELECT id FROM roles WHERE code='admin' FOR UPDATE")->fetchColumn();
-        requireReauth($user,'users.manage'); $old=$id===null ? null : accountRow(promotionId($id,'id'),true);
-        if ($old) protectLastAdmin($old,$fields);
+        requireReauth($user,'users.manage'); $old=$id===null ? null : accountRow(entityId($id,'id'),true);
+        if ($old) { ensureRoleAssignable($user,(string)$old['role_id']); protectLastAdmin($old,$fields); }
         $uid=writeRow('users',$fields,$old ? (string)$old['id'] : null);
         if ($old && ($old['status']!==$fields['status'] || (string)$old['role_id']!==$fields['role_id'] || $old['email']!==$fields['email'] || $password!==null || $force===true)) revokeAccount($uid);
-        audit($old ? 'user_updated' : 'user_created',$requestId,$user['id']); $result=userDocument(accountRow($uid)); db()->commit(); respond($result,$old ? 200 : 201);
+        audit($old ? 'user_updated' : 'user_created',$requestId,$user['id'],'users',$uid); $result=userDocument(accountRow($uid)); db()->commit(); respond($result,$old ? 200 : 201);
     }
     if ($method==='DELETE' && $id!==null) {
         db()->beginTransaction(); query("SELECT id FROM roles WHERE code='admin' FOR UPDATE")->fetchColumn(); requireReauth($user,'users.manage');
-        $old=accountRow(promotionId($id,'id'),true); protectLastAdmin($old,[],true);
-        query("UPDATE users SET status='inactive',deleted_at=UTC_TIMESTAMP() WHERE id=?",[$old['id']]); revokeAccount((string)$old['id']); audit('user_deleted',$requestId,$user['id']); db()->commit(); respond(['id'=>(string)$old['id'],'deleted'=>true]);
+        $old=accountRow(entityId($id,'id'),true); ensureRoleAssignable($user,(string)$old['role_id']); protectLastAdmin($old,[],true);
+        query("UPDATE users SET status='inactive',deleted_at=UTC_TIMESTAMP() WHERE id=?",[$old['id']]); revokeAccount((string)$old['id']); audit('user_deleted',$requestId,$user['id'],'users',(string)$old['id']); db()->commit(); respond(['id'=>(string)$old['id'],'deleted'=>true]);
     }
-    fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
+    fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
 }
 const SETTING_RULES=['site_url'=>['type'=>'string','public'=>true,'rule'=>'url'],'admin_url'=>['type'=>'string','public'=>false,'rule'=>'url'],'api_url'=>['type'=>'string','public'=>false,'rule'=>'url'],'timezone'=>['type'=>'string','public'=>true,'rule'=>'timezone'],'default_currency'=>['type'=>'string','public'=>true,'rule'=>'currency']];
 function settingValue(string $key,mixed $value): string {
     $rule=SETTING_RULES[$key]['rule'];
-    if (!is_string($value)) throw new InvalidArgumentException('Valor de configuraciÃ³n debe ser string');
+    if (!is_string($value)) throw new InvalidArgumentException('Valor de configuración debe ser string');
     if ($rule==='url') return safeContentUrl(['value'=>$value],'value',true);
-    if ($rule==='timezone' && !in_array($value,DateTimeZone::listIdentifiers(),true)) throw new InvalidArgumentException('Zona horaria invÃ¡lida');
-    if ($rule==='currency' && !in_array($value,['CRC','USD'],true)) throw new InvalidArgumentException('Moneda invÃ¡lida');
+    if ($rule==='timezone' && !in_array($value,DateTimeZone::listIdentifiers(),true)) throw new InvalidArgumentException('Zona horaria inválida');
+    if ($rule==='currency' && !in_array($value,['CRC','USD'],true)) throw new InvalidArgumentException('Moneda inválida');
     return $value;
 }
 function settingsDocument(bool $public): array {
@@ -98,5 +98,5 @@ function handleSettings(string $scope,string $method,?string $key,?array $user,s
         query('INSERT INTO settings (setting_key,setting_value,value_type,is_public,updated_by) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),value_type=VALUES(value_type),is_public=VALUES(is_public),updated_by=VALUES(updated_by)',[$key,$value,$rule['type'],(int)$rule['public'],$user['id']]);
         audit('setting_updated_'.$key,$requestId,$user['id']); $result=array_values(array_filter(settingsDocument(false),fn($x)=>$x['key']===$key))[0]; db()->commit(); respond($result);
     }
-    fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
+    fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
 }

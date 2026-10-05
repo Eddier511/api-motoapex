@@ -1,35 +1,6 @@
 <?php
 declare(strict_types=1);
 
-function plainPromotionText(array $a, string $key, int $max, bool $required = false): string {
-    $value=textField($a,$key,$max,$required);
-    if ($value!==strip_tags($value)) throw new InvalidArgumentException("Usa texto plano: $key");
-    return $value;
-}
-function promotionId(mixed $value, string $key): string {
-    if (!is_string($value) || !preg_match('/^[1-9][0-9]{0,19}$/D',$value) || (strlen($value)===20 && strcmp($value,'18446744073709551615')>0)) throw new InvalidArgumentException("ID inválido: $key");
-    return $value;
-}
-function promotionDate(array $a, string $key): string {
-    $value=textField($a,$key,32,true);
-    if (!preg_match('/^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(Z|[+-][0-9]{2}:[0-9]{2})$/D',$value,$matches)) throw new InvalidArgumentException("Fecha ISO 8601 con zona requerida: $key");
-    // MySQL DATETIME supports years 1000..9999. Reject normalized impossible dates.
-    $date=DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:sP',$matches[1].($matches[2]==='Z' ? '+00:00' : $matches[2]));
-    $errors=DateTimeImmutable::getLastErrors();
-    if (!$date || ($errors && ($errors['warning_count'] || $errors['error_count'])) || $date->format('Y-m-d\TH:i:s')!==$matches[1] || (int)$date->format('Y')<1000) throw new InvalidArgumentException("Fecha inválida: $key");
-    if ($matches[2]!=='Z' && (int)substr($matches[2],1,2)>14) throw new InvalidArgumentException("Zona inválida: $key");
-    $date=$date->setTimezone(new DateTimeZone('UTC'));
-    if ((int)$date->format('Y')<1000 || (int)$date->format('Y')>9999) throw new InvalidArgumentException("Fecha fuera de rango: $key");
-    return $date->format('Y-m-d H:i:s');
-}
-function promotionHref(array $a): string {
-    $value=textField($a,'buttonHref',2048,true);
-    $decoded=rawurldecode($value);
-    if (preg_match('/[\x00-\x20\x7f\\\\]/',$decoded)) throw new InvalidArgumentException('Destino inválido');
-    if (str_starts_with($decoded,'/') && !str_starts_with($decoded,'//')) return $value;
-    if (!filter_var($value,FILTER_VALIDATE_URL) || parse_url($value,PHP_URL_SCHEME)!=='https' || parse_url($value,PHP_URL_USER)!==null || parse_url($value,PHP_URL_PASS)!==null) throw new InvalidArgumentException('Destino debe ser ruta /... o URL HTTPS sin credenciales');
-    return $value;
-}
 function promotionMoney(array $a, string $key): string {
     if (!array_key_exists($key,$a)) throw new InvalidArgumentException("Precio requerido: $key");
     $value=numberField($a,$key,1000000000);
@@ -46,13 +17,13 @@ function validatePromotion(array $a): array {
     $image=urlField($a,'imageUrl');
     if ($image==='' || parse_url($image,PHP_URL_USER)!==null || parse_url($image,PHP_URL_PASS)!==null) throw new InvalidArgumentException('Imagen HTTPS requerida, sin credenciales');
     $brand=$a['brandId'] ?? null;
-    if ($brand!==null) $brand=promotionId($brand,'brandId');
-    $start=promotionDate($a,'startsAt'); $end=promotionDate($a,'endsAt');
+    if ($brand!==null) $brand=entityId($brand,'brandId');
+    $start=utcDate($a,'startsAt'); $end=utcDate($a,'endsAt');
     if ($end<$start) throw new InvalidArgumentException('Fin de vigencia anterior al inicio');
     $seen=[]; $links=[];
     foreach (listField($a,'motorcycles',100) as $item) {
         foreach (array_keys($item) as $key) if (!in_array($key,['motorcycleId','originalPrice','promoPrice','currency'],true)) throw new InvalidArgumentException("Campo desconocido en relación: $key");
-        $id=promotionId($item['motorcycleId'] ?? null,'motorcycleId');
+        $id=entityId($item['motorcycleId'] ?? null,'motorcycleId');
         if (isset($seen[$id])) throw new InvalidArgumentException('Moto relacionada duplicada');
         $seen[$id]=true;
         if (!isset($item['currency'])) throw new InvalidArgumentException('Moneda requerida en relación');
@@ -60,7 +31,7 @@ function validatePromotion(array $a): array {
         if ((float)$promo>(float)$original) throw new InvalidArgumentException('Precio promocional mayor al original');
         $links[]=['motorcycleId'=>$id,'originalPrice'=>$original,'promoPrice'=>$promo,'currency'=>choice($item,'currency',['CRC','USD'],'CRC')];
     }
-    return ['title'=>plainPromotionText($a,'title',255,true),'slug'=>$slug,'description'=>plainPromotionText($a,'description',20000),'imageUrl'=>$image,'brandId'=>$brand,'motorcycles'=>$links,'startsAt'=>$start,'endsAt'=>$end,'status'=>choice($a,'status',['active','inactive','expired'],'inactive'),'featured'=>flag($a,'featured'),'showOnHome'=>flag($a,'showOnHome'),'order'=>numberField($a,'order',1000000,true),'buttonLabel'=>plainPromotionText($a,'buttonLabel',100,true),'buttonHref'=>promotionHref($a)];
+    return ['title'=>plainText($a,'title',255,true),'slug'=>$slug,'description'=>plainText($a,'description',20000),'imageUrl'=>$image,'brandId'=>$brand,'motorcycles'=>$links,'startsAt'=>$start,'endsAt'=>$end,'status'=>choice($a,'status',['active','inactive','expired'],'inactive'),'featured'=>flag($a,'featured'),'showOnHome'=>flag($a,'showOnHome'),'order'=>numberField($a,'order',1000000,true),'buttonLabel'=>plainText($a,'buttonLabel',100,true),'buttonHref'=>safeDestination($a)];
 }
 function promotionRow(string $id, bool $lock=false): array {
     $selector=ctype_digit($id) ? 'id=?' : 'slug=?';
@@ -68,22 +39,16 @@ function promotionRow(string $id, bool $lock=false): array {
     if (!$row) fail('NOT_FOUND','Promoción no encontrada.',404);
     return $row;
 }
-function promotionBrand(mixed $id, bool $public): ?array {
-    if ($id===null) return null;
-    $row=query('SELECT id,name,slug,primary_color,status,deleted_at FROM brands WHERE id=?',[$id])->fetch();
-    if (!$row || ($public && ($row['deleted_at']!==null || $row['status']!=='active'))) return null;
-    return ['id'=>(string)$row['id'],'name'=>$row['name'],'slug'=>$row['slug'],'primaryColor'=>$row['primary_color']];
-}
 function promotionDocument(array $row, bool $public): ?array {
     // Public validity uses the same UTC database clock as catalog queries.
     if ($public && !query("SELECT id FROM promotions WHERE id=? AND status='active' AND deleted_at IS NULL AND starts_at<=UTC_TIMESTAMP() AND ends_at>=UTC_TIMESTAMP()",[$row['id']])->fetchColumn()) return null;
-    $brand=promotionBrand($row['brand_id'],$public);
+    $brand=brandSummary($row['brand_id'],$public);
     if ($public && $row['brand_id']!==null && $brand===null) return null;
     $image=mediaUrl($row['image_media_id']);
     if ($public && (!filter_var($image,FILTER_VALIDATE_URL) || parse_url($image,PHP_URL_SCHEME)!=='https' || parse_url($image,PHP_URL_USER)!==null || parse_url($image,PHP_URL_PASS)!==null)) return null;
     // Reject unsafe legacy destinations rather than exposing them publicly.
     if ($public) {
-        try { promotionHref(['buttonHref'=>$row['button_href']]); }
+        try { safeDestination(['buttonHref'=>$row['button_href']]); }
         catch (InvalidArgumentException) { return null; }
     }
     $relations=query('SELECT * FROM promotion_motorcycles WHERE promotion_id=? ORDER BY id',[$row['id']])->fetchAll();

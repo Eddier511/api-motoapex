@@ -8,7 +8,7 @@ function accountLimit(string $action,string $subject,int $maximum): void {
     // Independent of client IP: distributed guesses share the same account bucket.
     $bucket=hash('sha256','account:'.$action.':'.$subject.':'.intdiv(time(),900));
     query('INSERT INTO rate_limits (bucket,hits,expires_at) VALUES (?,1,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)) ON DUPLICATE KEY UPDATE hits=hits+1',[$bucket]);
-    if ((int)query('SELECT hits FROM rate_limits WHERE bucket=?',[$bucket])->fetchColumn()>$maximum) { header('Retry-After: 900'); fail('RATE_LIMITED','Demasiados intentos. Intenta mÃ¡s tarde.',429); }
+    if ((int)query('SELECT hits FROM rate_limits WHERE bucket=?',[$bucket])->fetchColumn()>$maximum) { header('Retry-After: 900'); fail('RATE_LIMITED','Demasiados intentos. Intenta más tarde.',429); }
 }
 function accountRow(string $id,bool $lock=false): array {
     $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.deleted_at IS NULL'.($lock ? ' FOR UPDATE' : ''),[$id])->fetch();
@@ -27,11 +27,11 @@ function revokeAccount(string $id): void {
 }
 function accountIdentity(): array {
     $auth=$_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-    if (!preg_match('/^Bearer ([a-f0-9]{64})$/D',$auth,$m)) fail('UNAUTHENTICATED','Inicia sesiÃ³n.',401);
+    if (!preg_match('/^Bearer ([a-f0-9]{64})$/D',$auth,$m)) fail('UNAUTHENTICATED','Inicia sesión.',401);
     $s=query('SELECT s.*,u.status,u.deleted_at,u.must_change_password FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP() AND s.revoked_at IS NULL',[hash('sha256',$m[1])])->fetch();
-    if (!$s || $s['status']!=='active' || $s['deleted_at']!==null) fail('UNAUTHENTICATED','SesiÃ³n invÃ¡lida o vencida.',401);
+    if (!$s || $s['status']!=='active' || $s['deleted_at']!==null) fail('UNAUTHENTICATED','Sesión inválida o vencida.',401);
     $fingerprint=permissionFingerprint((string)$s['user_id']);
-    if ($s['permission_fingerprint']===null || !hash_equals($s['permission_fingerprint'],$fingerprint)) { revokeAccount((string)$s['user_id']); fail('UNAUTHENTICATED','Permisos cambiaron. Inicia sesiÃ³n.',401); }
+    if ($s['permission_fingerprint']===null || !hash_equals($s['permission_fingerprint'],$fingerprint)) { revokeAccount((string)$s['user_id']); fail('UNAUTHENTICATED','Permisos cambiaron. Inicia sesión.',401); }
     if ($s['must_change_password']) { revokeAccount((string)$s['user_id']); fail('PASSWORD_CHANGE_REQUIRED','Completa el cambio obligatorio desde el login.',403); }
     if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$s['user_id']])->fetchColumn() && $s['mfa_verified_at']===null) { revokeAccount((string)$s['user_id']); fail('MFA_REQUIRED','Completa MFA desde el login.',403); }
     query('UPDATE user_sessions SET last_seen_at=UTC_TIMESTAMP() WHERE id=?',[$s['id']]);
@@ -39,11 +39,11 @@ function accountIdentity(): array {
     return userDocument(accountRow((string)$s['user_id']));
 }
 function validPassword(mixed $v): string {
-    if (!is_string($v) || strlen($v)<16 || strlen($v)>72 || str_contains($v,"\0")) throw new InvalidArgumentException('ContraseÃ±a debe tener 16-72 bytes');
+    if (!is_string($v) || strlen($v)<16 || strlen($v)>72 || str_contains($v,"\0")) throw new InvalidArgumentException('Contraseña debe tener 16-72 bytes');
     return $v;
 }
 function changedPassword(array $u,string $password): void {
-    if (password_verify($password,$u['password_hash'])) throw new InvalidArgumentException('La contraseÃ±a nueva debe ser diferente');
+    if (password_verify($password,$u['password_hash'])) throw new InvalidArgumentException('La contraseña nueva debe ser diferente');
     query('UPDATE users SET password_hash=?,password_changed_at=UTC_TIMESTAMP(),must_change_password=0,failed_login_attempts=0,locked_until=NULL WHERE id=?',[password_hash($password,PASSWORD_DEFAULT),$u['id']]);
     revokeAccount((string)$u['id']);
 }
@@ -59,22 +59,22 @@ function issueChallenge(array $u,string $purpose,?string $mfaTime=null,?string $
     return [$purpose==='reauth' ? 'reauthToken' : 'challengeToken'=>$token,'challenge'=>$purpose,'expiresAt'=>iso($expires)];
 }
 function takeChallenge(string $token,string $purpose,?string $action=null,?string $session=null): array {
-    if (!preg_match('/^[a-f0-9]{64}$/D',$token)) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido.',401);
+    if (!preg_match('/^[a-f0-9]{64}$/D',$token)) fail('UNAUTHENTICATED','Desafío inválido.',401);
     $candidate=query('SELECT user_id FROM auth_challenges WHERE token_hash=?',[hash('sha256',$token)])->fetchColumn();
-    if (!$candidate) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido o vencido.',401);
+    if (!$candidate) fail('UNAUTHENTICATED','Desafío inválido o vencido.',401);
     // Lock the user before challenges/sessions, matching password changes and revocation.
     $u=accountRow((string)$candidate,true);
     $c=query('SELECT * FROM auth_challenges WHERE token_hash=? AND purpose=? AND expires_at>UTC_TIMESTAMP() AND used_at IS NULL FOR UPDATE',[hash('sha256',$token),$purpose])->fetch();
-    if (!$c || ($purpose==='reauth' && ($c['action']!==$action || (string)$c['session_id']!==$session))) fail('UNAUTHENTICATED','DesafÃ­o invÃ¡lido o vencido.',401);
-    if ($purpose==='reauth' && !query('SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE',[$session,$u['id']])->fetchColumn()) fail('UNAUTHENTICATED','SesiÃ³n revocada.',401);
-    if ($u['status']!=='active' || !hash_equals($c['permission_fingerprint'],permissionFingerprint((string)$u['id'])) || !hash_equals($c['password_fingerprint'],hash('sha256',$u['password_hash']))) fail('UNAUTHENTICATED','DesafÃ­o invalidado.',401);
+    if (!$c || ($purpose==='reauth' && ($c['action']!==$action || (string)$c['session_id']!==$session))) fail('UNAUTHENTICATED','Desafío inválido o vencido.',401);
+    if ($purpose==='reauth' && !query('SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE',[$session,$u['id']])->fetchColumn()) fail('UNAUTHENTICATED','Sesión revocada.',401);
+    if ($u['status']!=='active' || !hash_equals($c['permission_fingerprint'],permissionFingerprint((string)$u['id'])) || !hash_equals($c['password_fingerprint'],hash('sha256',$u['password_hash']))) fail('UNAUTHENTICATED','Desafío invalidado.',401);
     query('UPDATE auth_challenges SET used_at=UTC_TIMESTAMP() WHERE id=?',[$c['id']]);
     return [$u,$c];
 }
 function requireReauth(array $u,string $action): void {
     if (!db()->inTransaction()) throw new LogicException('Reauthentication requires a transaction');
     [$verified]=takeChallenge($_SERVER['HTTP_X_REAUTH_TOKEN'] ?? '', 'reauth',$action,(string)$GLOBALS['accountSession']['id']);
-    if ((string)$verified['id']!==$u['id']) fail('FORBIDDEN','ReautenticaciÃ³n de otra cuenta.',403);
+    if ((string)$verified['id']!==$u['id']) fail('FORBIDDEN','Reautenticación de otra cuenta.',403);
 }
 function mfaKey(): string {
     $key=base64_decode(config()['mfa_encryption_key'] ?? '',true);
@@ -119,7 +119,7 @@ function recoveryCodes(string $id): array {
 }
 function smtpConfig(): array {
     $s=config()['smtp'] ?? []; $url=config()['password_reset_url'] ?? '';
-    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null || preg_match('/[\x00-\x20\x7f\\\\]/',rawurldecode($url))) fail('SMTP_NOT_CONFIGURED','RecuperaciÃ³n pendiente: configurar SMTP y URL de recuperaciÃ³n en el servidor.',503);
+    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null || preg_match('/[\x00-\x20\x7f\\\\]/',rawurldecode($url))) fail('SMTP_NOT_CONFIGURED','Recuperación pendiente: configurar SMTP y URL de recuperación en el servidor.',503);
     $localTest=(config()['environment'] ?? '')==='test' && $s['host']==='127.0.0.1';
     if (!$localTest && (!in_array($s['encryption'] ?? '',['tls','ssl'],true) || empty($s['username']) || empty($s['password']))) fail('SMTP_NOT_CONFIGURED','SMTP requiere TLS y credenciales del servidor.',503);
     return $s;
@@ -128,9 +128,9 @@ function sendResetMail(string $email,string $token): void {
     $s=smtpConfig();
     foreach (['Exception','SMTP','PHPMailer'] as $file) require_once dirname(__DIR__).'/vendor/phpmailer/src/'.$file.'.php';
     $mail=new PHPMailer\PHPMailer\PHPMailer(true); $mail->isSMTP(); $mail->Host=$s['host']; $mail->Port=(int)($s['port'] ?? 587); $mail->SMTPSecure=$s['encryption'] ?? 'tls'; $mail->SMTPAutoTLS=$mail->SMTPSecure!==''; $mail->SMTPAuth=!empty($s['username']); $mail->Username=$s['username'] ?? ''; $mail->Password=$s['password'] ?? ''; $mail->Timeout=10; $mail->SMTPDebug=0; $mail->CharSet='UTF-8';
-    $mail->setFrom($s['from'],'MotoApex'); $mail->addAddress($email); $mail->Subject='Restablecer contraseÃ±a MotoApex'; $mail->isHTML(false);
+    $mail->setFrom($s['from'],'MotoApex'); $mail->addAddress($email); $mail->Subject='Restablecer contraseña MotoApex'; $mail->isHTML(false);
     // Fragment avoids sending the token to frontend HTTP access logs or Referer.
-    $mail->Body="Abre este enlace para restablecer tu contraseÃ±a. Vence en 30 minutos y solo puede usarse una vez.\n".config()['password_reset_url'].'#token='.$token."\nSi no solicitaste el cambio, ignora este correo.";
+    $mail->Body="Abre este enlace para restablecer tu contraseña. Vence en 30 minutos y solo puede usarse una vez.\n".config()['password_reset_url'].'#token='.$token."\nSi no solicitaste el cambio, ignora este correo.";
     $mail->send();
 }
 function handleAuth(array $path,string $method,string $requestId): void {
@@ -139,7 +139,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
     if ($route==='me' && $method==='GET') respond(identity());
     if ($route==='login' && $method==='POST') {
         limit('login',10); $a=body(); contentKeys($a,['email','password']); $email=strtolower(textField($a,'email',191,true));
-        $password=$a['password']; if (!is_string($password) || strlen($password)<1 || strlen($password)>72 || str_contains($password,"\0")) throw new InvalidArgumentException('ContraseÃ±a invÃ¡lida');
+        $password=$a['password']; if (!is_string($password) || strlen($password)<1 || strlen($password)>72 || str_contains($password,"\0")) throw new InvalidArgumentException('Contraseña inválida');
         accountLimit('login',hash('sha256',$email),8);
         db()->beginTransaction();
         $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE email=? AND deleted_at IS NULL FOR UPDATE',[$email])->fetch();
@@ -161,7 +161,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
         $subject=query('SELECT user_id FROM auth_challenges WHERE token_hash=?',[hash('sha256',textField($a,'challengeToken',64,true))])->fetchColumn();
         if ($subject) accountLimit('mfa-login',(string)$subject,8);
         db()->beginTransaction(); [$u,$c]=takeChallenge(textField($a,'challengeToken',64,true),'mfa_login');
-        if (!verifyMfa((string)$u['id'],$a)) { audit('mfa_failed',$requestId,(string)$u['id']); db()->commit(); fail('INVALID_MFA','CÃ³digo invÃ¡lido. Inicia sesiÃ³n para un nuevo desafÃ­o.',401); }
+        if (!verifyMfa((string)$u['id'],$a)) { audit('mfa_failed',$requestId,(string)$u['id']); db()->commit(); fail('INVALID_MFA','Código inválido. Inicia sesión para un nuevo desafío.',401); }
         $time=gmdate('Y-m-d H:i:s'); $result=$u['must_change_password'] ? issueChallenge($u,'password_change',$time) : issueSession($u,$time);
         audit('mfa_login_success',$requestId,(string)$u['id']); db()->commit(); respond($result);
     }
@@ -173,7 +173,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
         changedPassword($u,$password); $result=issueSession(accountRow((string)$u['id']),$c['mfa_verified_at']); audit('password_required_completed',$requestId,(string)$u['id']); db()->commit(); respond($result);
     }
     if ($route==='password/forgot' && $method==='POST') {
-        limit('password-forgot',5); $a=body(); contentKeys($a,['email']); $email=strtolower(textField($a,'email',191,true)); if (!filter_var($email,FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Correo invÃ¡lido');
+        limit('password-forgot',5); $a=body(); contentKeys($a,['email']); $email=strtolower(textField($a,'email',191,true)); if (!filter_var($email,FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Correo inválido');
         accountLimit('recovery',hash('sha256',$email),3); smtpConfig();
         $u=query("SELECT id,email FROM users WHERE email=? AND status='active' AND deleted_at IS NULL",[$email])->fetch();
         if ($u) {
@@ -183,18 +183,18 @@ function handleAuth(array $path,string $method,string $requestId): void {
             try { sendResetMail($u['email'],$token); db()->commit(); }
             catch (Throwable) { db()->rollBack(); /* Same public response for missing addresses and delivery failures. */ error_log('MotoApex request='.$requestId.' smtp_delivery_failed'); }
         }
-        audit('password_recovery_requested',$requestId); respond(['message'=>'Si existe una cuenta activa, recibirÃ¡s un enlace de recuperaciÃ³n.']);
+        audit('password_recovery_requested',$requestId); respond(['message'=>'Si existe una cuenta activa, recibirás un enlace de recuperación.']);
     }
     if ($route==='password/reset' && $method==='POST') {
         limit('password-reset',10); $a=body(); contentKeys($a,['token','newPassword']); $password=validPassword($a['newPassword']); $token=textField($a,'token',64,true);
-        if (!preg_match('/^[a-f0-9]{64}$/D',$token)) fail('INVALID_RESET','Enlace invÃ¡lido o vencido.',401);
+        if (!preg_match('/^[a-f0-9]{64}$/D',$token)) fail('INVALID_RESET','Enlace inválido o vencido.',401);
         db()->beginTransaction();
         // Lock user first, then token, consistently with forgot and password changes.
         $candidate=query('SELECT user_id FROM password_reset_tokens WHERE token_hash=?',[hash('sha256',$token)])->fetchColumn();
-        if (!$candidate) fail('INVALID_RESET','Enlace invÃ¡lido o vencido.',401);
+        if (!$candidate) fail('INVALID_RESET','Enlace inválido o vencido.',401);
         $u=accountRow((string)$candidate,true);
         $reset=query('SELECT id FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>UTC_TIMESTAMP() FOR UPDATE',[hash('sha256',$token)])->fetchColumn();
-        if (!$reset || $u['status']!=='active') fail('INVALID_RESET','Enlace invÃ¡lido o vencido.',401);
+        if (!$reset || $u['status']!=='active') fail('INVALID_RESET','Enlace inválido o vencido.',401);
         changedPassword($u,$password); audit('password_reset_completed',$requestId,(string)$u['id']); db()->commit(); respond(['changed'=>true,'loginRequired'=>true]);
     }
     $user=identity(); $uid=$user['id'];
@@ -205,7 +205,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
         db()->beginTransaction(); $u=accountRow($uid,true);
         if (!is_string($a['password']) || strlen($a['password'])>72 || !password_verify($a['password'],$u['password_hash'])) { db()->rollBack(); fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401); }
         $mfaTime=null;
-        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) { if (!verifyMfa($uid,$a)) { db()->rollBack(); fail('INVALID_MFA','CÃ³digo invÃ¡lido.',401); } $mfaTime=gmdate('Y-m-d H:i:s'); }
+        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) { if (!verifyMfa($uid,$a)) { db()->rollBack(); fail('INVALID_MFA','Código inválido.',401); } $mfaTime=gmdate('Y-m-d H:i:s'); }
         $result=issueChallenge($u,'reauth',$mfaTime,$action,(string)$GLOBALS['accountSession']['id']); audit('reauth_success',$requestId,$uid); db()->commit(); respond($result);
     }
     if ($route==='profile' && $method==='GET') respond($user);
@@ -216,20 +216,20 @@ function handleAuth(array $path,string $method,string $requestId): void {
     if ($route==='password/change' && $method==='POST') {
         limit('password-change',10); $a=body(); contentKeys($a,['currentPassword','newPassword']); $password=validPassword($a['newPassword']);
         db()->beginTransaction(); $u=accountRow($uid,true); requireReauth($user,'password.change');
-        if (!is_string($a['currentPassword']) || strlen($a['currentPassword'])>72 || !password_verify($a['currentPassword'],$u['password_hash'])) { db()->rollBack(); fail('INVALID_CREDENTIALS','ContraseÃ±a actual incorrecta.',401); }
+        if (!is_string($a['currentPassword']) || strlen($a['currentPassword'])>72 || !password_verify($a['currentPassword'],$u['password_hash'])) { db()->rollBack(); fail('INVALID_CREDENTIALS','Contraseña actual incorrecta.',401); }
         changedPassword($u,$password); audit('password_changed',$requestId,$uid); db()->commit(); respond(['changed'=>true,'loginRequired'=>true]);
     }
     if ($route==='mfa/status' && $method==='GET') respond(['enabled'=>(bool)query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()]);
     if ($route==='mfa/enroll' && $method==='POST') {
         limit('mfa-enroll',5); mfaKey(); db()->beginTransaction(); $u=accountRow($uid,true); requireReauth($user,'mfa.manage');
-        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA ya estÃ¡ activo.',409);
+        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA ya está activo.',409);
         $secret=random_bytes(20); query('INSERT INTO user_mfa (user_id,encrypted_secret) VALUES (?,?) ON DUPLICATE KEY UPDATE encrypted_secret=VALUES(encrypted_secret),last_counter=-1',[$uid,encryptMfa($secret)]);
         audit('mfa_enrollment_started',$requestId,$uid); db()->commit(); respond(['otpauthUri'=>'otpauth://totp/'.rawurlencode('MotoApex:'.$u['email']).'?secret='.base32($secret).'&issuer=MotoApex&algorithm=SHA1&digits=6&period=30']);
     }
     if ($route==='mfa/confirm' && $method==='POST') {
         limit('mfa-confirm',10); $a=body(); contentKeys($a,['code']); db()->beginTransaction(); accountRow($uid,true); requireReauth($user,'mfa.manage');
-        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA ya estÃ¡ activo.',409);
-        if (!verifyMfa($uid,$a,true)) { db()->rollBack(); fail('INVALID_MFA','CÃ³digo invÃ¡lido.',401); }
+        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA ya está activo.',409);
+        if (!verifyMfa($uid,$a,true)) { db()->rollBack(); fail('INVALID_MFA','Código inválido.',401); }
         query('UPDATE user_mfa SET confirmed_at=UTC_TIMESTAMP() WHERE user_id=?',[$uid]); $codes=recoveryCodes($uid); revokeAccount($uid); audit('mfa_enabled',$requestId,$uid); db()->commit(); respond(['enabled'=>true,'recoveryCodes'=>$codes,'loginRequired'=>true]);
     }
     if ($route==='mfa/disable' && $method==='POST') {
@@ -238,7 +238,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
     }
     if ($route==='mfa/recovery-codes' && $method==='POST') {
         limit('mfa-recovery-codes',5); db()->beginTransaction(); accountRow($uid,true); requireReauth($user,'mfa.manage');
-        if (!query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA no estÃ¡ activo.',409);
+        if (!query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$uid])->fetchColumn()) fail('CONFLICT','MFA no está activo.',409);
         $codes=recoveryCodes($uid); audit('mfa_recovery_codes_rotated',$requestId,$uid); db()->commit(); respond(['recoveryCodes'=>$codes]);
     }
     fail('NOT_FOUND','Ruta no encontrada.',404);
