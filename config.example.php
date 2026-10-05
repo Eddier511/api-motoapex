@@ -5,7 +5,13 @@ return [
     'db_name' => 'u253423478_motoapex',
     'db_user' => 'u253423478_rootmotoapex',
     'db_password' => 'REPLACE_ON_SERVER',
-    // Exact HTTPS origins, without a trailing slash. Confirm your real domains.
-    'allowed_origins' => ['https://motoapexcr.com', 'https://admin.motoapexcr.com'],
+    // Exact HTTPS origins, without a trailing slash. Remove temporary sites after migration.
+    'allowed_origins' => [
+        'https://wheat-stinkbug-153908.hostingersite.com',
+        'https://darkorange-ant-895420.hostingersite.com',
+        'https://motoapexcr.com',
+        'https://admin.motoapexcr.com',
+    ],
     'token_lifetime' => 28800,
 ];
+
