@@ -16,7 +16,7 @@ API REST v1 para PHP 8.3+ y MySQL 8 (PDO MySQL). Web y admin son builds estátic
 
 Incluye autenticación, logout, identidad, permisos por rol, CRUD de marcas/categorías/motos, colores y galerías por URL HTTPS, especificaciones, recepción y seguimiento de leads. La base comienza vacía; no importa datos ficticios.
 
-Promociones, contenido editable, carga de archivos, gestión de usuarios, recuperación de contraseña, MFA, historial de inventario y analítica de visitas quedan pendientes. No anunciar sus botones como funcionales. No se ha conectado todavía el frontend de los otros repositorios ni desplegado en Hostinger.
+Promociones ahora incluyen CRUD real, precios por moto, vigencia, permisos y eliminación lógica. Requieren aplicar 003_promotions.sql después de 002, una sola vez. El contenido editable, carga de archivos, gestión de usuarios, recuperación de contraseña, MFA, historial de inventario y analítica de visitas siguen pendientes. La conexión de promociones a los frontends y la verificación en Hostinger siguen pendientes; no se despliegan automáticamente.
 
 ## Seguridad y verificación
 

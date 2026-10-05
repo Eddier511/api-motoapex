@@ -50,3 +50,47 @@ Respuesta privada añade `brand`, `category`, `id`, `createdAt`, `updatedAt`. Re
 `GET /admin/leads` (últimas 200) y `PATCH /admin/leads/{id}`: `{status,notes,assignedTo}`. Roles admin/sales. Estados: new/contacted/follow_up/closed/discarded. `assignedTo` es el ID de un usuario activo admin/sales, como cadena; vacío desasigna. `notes` en PATCH agrega una nota nueva; la respuesta devuelve un array de notas con note/date. No hay listado público ni eliminación de leads.
 
 `GET /health`: verifica conexión DB sin exponer versión o credenciales.
+
+## Promociones
+
+Rutas exactas: `GET /public/promotions`, `GET /public/promotions/{id-o-slug}`; `GET /admin/promotions`, `GET /admin/promotions/{id-o-slug}`, `POST /admin/promotions`, `PUT /admin/promotions/{id-o-slug}`, `DELETE /admin/promotions/{id-o-slug}`. Todas las rutas admin requieren Bearer y `promotions.manage`, incluso lectura y eliminación. El esquema inicial concede ese permiso a **admin y marketing**; editor y sales reciben 403. Se evalúa el permiso guardado en la base, por lo que retirarlo revoca el acceso. POST responde 201, PUT 200 y DELETE 200 `{data:{id:"...",deleted:true}}`.
+
+POST/PUT requieren todos los campos del siguiente ejemplo salvo brandId (opcional/null). **PUT reemplaza completamente la ficha y el conjunto de motos**: `motorcycles:[]` elimina todas las relaciones, no las motos. Omitir un campo requerido devuelve 422 sin modificar la ficha. No es PATCH. Los IDs del ejemplo son ilustrativos; hay que reemplazarlos por IDs existentes. La API no importa ofertas de ejemplo ni crea promociones por migración.
+
+```json
+{
+  "title": "Campaña de prueba interna",
+  "slug": "campana-prueba-interna",
+  "description": "Descripción en texto plano, sin etiquetas HTML.",
+  "imageUrl": "https://cdn.example.com/campana.jpg",
+  "brandId": "1",
+  "motorcycles": [{
+    "motorcycleId": "12",
+    "originalPrice": 7800000,
+    "promoPrice": 7200000,
+    "currency": "CRC"
+  }],
+  "startsAt": "2026-10-01T00:00:00-06:00",
+  "endsAt": "2026-10-31T23:59:59-06:00",
+  "status": "inactive",
+  "featured": false,
+  "showOnHome": false,
+  "order": 10,
+  "buttonLabel": "Ver oferta",
+  "buttonHref": "/marca/modelo"
+}
+```
+
+Fechas ISO 8601 con segundos y zona explícita se convierten a UTC; respuestas startsAt/endsAt terminan en Z. Fin no puede preceder inicio. `status`: active/inactive/expired; featured/showOnHome son booleanos, order entero 0..1000000. Slug único (máximo 191 bytes, letras minúsculas/números/guiones, no solo numérico); el slug de una promoción eliminada sigue reservado (409). Título máximo 255 bytes, descripción 20000, texto de botón 100, URLs 2048; máximo 100 relaciones sin duplicados. No acepta campos desconocidos ni HTML en texto.
+
+imageUrl debe ser HTTPS sin usuario/contraseña. buttonHref permite rutas internas que empiezan con `/` o HTTPS sin credenciales; prohíbe `//`, backslash, controles y esquemas ejecutables. No descarga imágenes ni permite uploads. brandId es null o ID existente no eliminado; cuando hay marca, todas las motos relacionadas deben pertenecer a ella. Motos inexistentes o eliminadas producen 422. Borradores pueden asociarse en admin, pero nunca se exponen al público.
+
+Cada relación contiene una única currency (CRC o USD) aplicable **a ambos precios** y coincidente con la moneda de la moto: no se admiten conversiones implícitas ni monedas separadas para original/promo. Precios JSON numéricos, no negativos, máximo 1000000000 y dos decimales. promoPrice no puede superar originalPrice. Guardado de promoción, media, relaciones y auditoría ocurre en una sola transacción; un error revierte todo.
+
+La respuesta incluye id como cadena, campos de la ficha, `brand` (null o `{id,name,slug,primaryColor}`) y `motorcycles` como array de `{id,motorcycleId,currency,originalPrice?,promoPrice?,motorcycle}`. El id de la relación y motorcycleId también son cadenas. motorcycle contiene solo id, slug, model, version, year, showPrice, allowQuote y brand (id/name/slug/primaryColor). Admin recibe además createdAt/updatedAt y ambos precios.
+
+Filtros públicos: active, no eliminada, `starts_at <= UTC_TIMESTAMP() <= ends_at` (extremos incluidos), marca opcional activa/no eliminada e imagen/destino seguros. Las relaciones solo incluyen motos publicadas/no eliminadas con marca/categoría activas/no eliminadas, moneda aún coincidente y marca coherente con la campaña. Si todas las relaciones dejan de ser públicas, la oferta completa desaparece (lista la omite; detalle 404). Una campaña general creada con motorcycles vacío puede seguir visible. Si showPrice=false, se omiten originalPrice/promoPrice de esa relación. No se devuelven SKU, inventario, autores, auditoría, deleted_at ni detalles administrativos. Orden ascendente por order y luego ID; showOnHome/featured no alteran la vigencia ni se fuerzan automáticamente.
+
+Eliminación es lógica (deleted_at); no borra motos, medios o relaciones históricas. No hay restauración automática. Lecturas de promociones: 300 por IP cada 15 minutos; escrituras autorizadas: 60 por IP cada 15 minutos. Al exceder: 429 JSON, Retry-After: 900, expuesto por CORS. Permanecen X-Request-ID y errores 401/403/404/409/422/429. Los orígenes de web/admin configurados siguen siendo exactos.
+
+Instalación: aplicar **003_promotions.sql una sola vez**, después de las migraciones anteriores, consultando schema_migrations y haciendo respaldo. Agrega button_label/button_href; no borra ni publica datos existentes. El dominio definitivo será https://api.motoapexcr.com/v1; cambiar la base de frontends y recompilar no cambia este contrato.

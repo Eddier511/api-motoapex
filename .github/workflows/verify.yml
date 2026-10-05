@@ -32,6 +32,9 @@ jobs:
           php -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
           python3 tests/integration.py
+          php tests/promotions_fixture.php
+          python3 tests/promotions.py
+          php tests/promotions_assert.php
       - name: Package without credentials
         run: |
           python3 bin/package-hostinger.py --output api-motoapex-hostinger.zip
