@@ -5,7 +5,7 @@ API REST v1 para PHP 8.3+ y MySQL 8 (PDO MySQL). Web y admin son builds estátic
 ## Instalar en Hostinger
 
 1. Crea el sitio/subdominio de la API, activa SSL y selecciona PHP 8.3 o superior con PDO MySQL. Confirma que los tres sitios y la base están en el mismo servidor: `127.0.0.1` solo funciona desde ese servidor.
-2. Descarga el artefacto `api-motoapex-hostinger` de una ejecución verde de GitHub Actions. No hay despliegue automático a producción.
+2. Descarga el artefacto `api-motoapex-hostinger` de una ejecución verde de GitHub Actions. CI y el generador local usan el mismo layout `public_html/`; no se debe subir el ZIP del código fuente de GitHub. No hay despliegue automático a producción.
 3. En la carpeta del sitio, coloca `src`, `bin`, `database` y `config.local.php` **fuera de `public_html`**. Copia únicamente `public/index.php` y `public/.htaccess` dentro de `public_html`. `index.php` espera encontrar `src` un nivel por encima de la raíz pública. No copies el `.htaccess` de la raíz del repositorio a `public_html`.
 4. Copia `config.example.php` como `config.local.php` en esa carpeta privada, cambia la contraseña desde el servidor y reemplaza `allowed_origins` por las URLs HTTPS exactas de web/admin. Los cuatro orígenes de config.example.php están confirmados: sitios temporales de Hostinger y dominios definitivos. Retira los temporales cuando finalice la migración. No subas esta configuración a GitHub.
 5. Tu esquema inicial ya está importado. Aplica únicamente `database/002_api_support.sql`, una sola vez y después de un respaldo: agrega los límites de peticiones y campos de presentación para la web. No vuelvas a importar `schema.sql` en esa base. Para una base de prueba vacía, importa primero `schema.sql` y luego `002_api_support.sql`.
@@ -29,6 +29,7 @@ GitHub Actions verifica sintaxis y pruebas HTTP contra MySQL 8 antes de empaquet
 Métricas operativas recomendadas: tasa de 5xx, fallos de login, respuestas 429, cambios administrativos y latencia p95. La versión registra eventos de login/cambios con `requestId` en el log del servidor, y cada respuesta registra estado HTTP y duración en milisegundos. Los cambios administrativos se guardan también en audit_logs, dentro de la transacción. Aún no incluye un colector de métricas, alertas ni almacenamiento de auditoría inmutable. Antes de uso con datos reales, configura monitoreo, backups con prueba de restauración, actualización de PHP, MFA de GitHub/hPanel y un usuario MySQL exclusivo para la API con permisos mínimos. Tras importar el esquema, el usuario de ejecución necesita SELECT/INSERT/UPDATE/DELETE, no DROP/GRANT/ALTER. La configuración pública de ejemplo contiene nombre y usuario de BD, nunca su contraseña.
 
 Consulta [contrato](docs/contract.md) y [prompts de integración](docs/integration-prompts.md).
+Para el bloqueo 403 del sitio temporal, consulta [diagnóstico y corrección de hosting](docs/hosting-403.md). El contrato no cambia.
 
 ## Compatibilidad del esquema recibido
 

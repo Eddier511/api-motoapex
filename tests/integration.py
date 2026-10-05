@@ -20,6 +20,10 @@ def call(path, method='GET', data=None, token=None, expected=200, origin=None):
     return result.get('data', result)
 call('admin/motorcycles', expected=401)
 call('public/brands', origin='https://attacker.example', expected=403)
+preflight = urllib.request.urlopen(urllib.request.Request(BASE+'public/leads', headers={'Origin':'https://admin.example.test','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type'}, method='OPTIONS'))
+assert preflight.status == 204
+assert preflight.headers['Access-Control-Allow-Origin'] == 'https://admin.example.test'
+assert 'retry-after' in preflight.headers['Access-Control-Expose-Headers'].lower()
 call('auth/login', 'POST', {'email': "' OR 1=1 --", 'password': 'bad'}, expected=401)
 token = call('auth/login', 'POST', {'email':'admin@example.test', 'password':'test-password-123456'})['token']
 sales = call('auth/login', 'POST', {'email':'sales@example.test', 'password':'test-password-123456'})['token']
@@ -44,10 +48,23 @@ call('admin/brands', 'POST', {'name':'Duplicate','slug':'ktm'}, token, 409)
 payload['colors'] = [{'id':'new-color','name':'Orange','hex':'#FF6600','images':[{'id':'new-image','url':'javascript:alert(1)'}]}]
 call('admin/motorcycles/'+moto['id'],'PUT',payload,token,422)
 payload['colors'] = []
+payload['colors'] = [{'id':'new-color','name':'Orange','hex':'#FF6600','status':'active','available':True,'images':[{'id':'new-image','url':'https://example.test/moto.jpg','alt':'Moto','isPrimary':True}]}]
+for private_state, public_state in [('reserved','reserved'),('coming_soon','coming-soon'),('sold_out','sold-out'),('available','available')]:
+    payload['status'] = private_state
+    call('admin/motorcycles/'+moto['id'],'PUT',payload,token)
+    item = call('public/motorcycles')[0]
+    assert isinstance(item['id'], str) and item['availability'] == public_state
+    assert item['colorOptions'][0]['images'][0]['url'] == 'https://example.test/moto.jpg'
+payload['allowQuote'] = False
+call('admin/motorcycles/'+moto['id'],'PUT',payload,token)
+call('public/leads','POST',{'name':'Test Lead','phone':'+50688888888','type':'quote','motorcycleId':moto['id']},expected=422)
+payload['allowQuote'] = True
+call('admin/motorcycles/'+moto['id'],'PUT',payload,token)
 call('admin/brands/'+brand['id'],'DELETE',token=token,expected=409)
 payload['published'] = 'false'
 call('admin/motorcycles/'+moto['id'],'PUT',payload,token,422)
-call('public/leads','POST',{'name':'Test Lead','phone':'+50688888888','type':'quote','motorcycleId':moto['id']},expected=201)
+created_lead = call('public/leads','POST',{'name':'Test Lead','phone':'+50688888888','type':'quote','motorcycleId':moto['id']},expected=201)
+assert isinstance(created_lead['id'], str)
 assert len(call('admin/leads',token=sales)) == 1
 call('public/leads',expected=405)
 call('auth/logout','POST',{},token)
