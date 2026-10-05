@@ -29,7 +29,7 @@ jobs:
       - name: Integration tests
         run: |
           php tests/setup.php
-          PHP_CLI_SERVER_WORKERS=4 php -d opcache.enable_cli=0 -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
+          PHP_CLI_SERVER_WORKERS=4 php -d opcache.enable=0 -d opcache.enable_cli=0 -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
           python3 tests/integration.py
           php tests/promotions_fixture.php
