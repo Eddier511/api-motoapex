@@ -35,6 +35,8 @@ jobs:
           php tests/promotions_fixture.php
           python3 tests/promotions.py
           php tests/promotions_assert.php
+          python3 tests/content.py
+          php tests/content_assert.php
       - name: Package without credentials
         run: |
           python3 bin/package-hostinger.py --output api-motoapex-hostinger.zip

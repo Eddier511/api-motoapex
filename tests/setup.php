@@ -16,5 +16,6 @@ foreach (explode(';',$schema) as $statement) {
 }
 db()->exec(file_get_contents(dirname(__DIR__).'/database/002_api_support.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/003_promotions.sql'));
+db()->exec(file_get_contents(dirname(__DIR__).'/database/004_web_content.sql'));
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Test','admin@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'admin']);
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Sales','sales@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'sales']);

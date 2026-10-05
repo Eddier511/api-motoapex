@@ -6,6 +6,7 @@ require dirname(__DIR__).'/src/bootstrap.php';
 require dirname(__DIR__).'/src/validation.php';
 require dirname(__DIR__).'/src/repository.php';
 require dirname(__DIR__).'/src/promotions.php';
+require dirname(__DIR__).'/src/content.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -37,7 +38,7 @@ try {
     if ($path===['auth','login'] && $method==='POST') {
         limit('login',10);
         $a=body(); $email=textField($a,'email',190,true); $password=$a['password'] ?? '';
-        if (!is_string($password) || strlen($password)<1 || strlen($password)>72) throw new InvalidArgumentException('Contraseña inválida');
+        if (!is_string($password) || strlen($password)<1 || strlen($password)>72) throw new InvalidArgumentException('ContraseÃ±a invÃ¡lida');
         $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE u.email=? AND u.deleted_at IS NULL',[strtolower($email)])->fetch();
         $hash=$u['password_hash'] ?? '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi';
         $valid=password_verify($password,$hash);
@@ -48,9 +49,9 @@ try {
             audit('login_failed',$requestId);
             fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401);
         }
-        if ($u['must_change_password']) fail('PASSWORD_CHANGE_REQUIRED','Solicita restablecer tu contraseña.',403);
+        if ($u['must_change_password']) fail('PASSWORD_CHANGE_REQUIRED','Solicita restablecer tu contraseÃ±a.',403);
         // Fail closed for accounts with MFA configured until the challenge flow is implemented.
-        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) fail('MFA_REQUIRED','Esta cuenta requiere un flujo MFA aún no disponible.',403);
+        if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) fail('MFA_REQUIRED','Esta cuenta requiere un flujo MFA aÃºn no disponible.',403);
         if (password_needs_rehash($u['password_hash'],PASSWORD_DEFAULT)) query('UPDATE users SET password_hash=? WHERE id=?',[password_hash($password,PASSWORD_DEFAULT),$u['id']]);
         $token=bin2hex(random_bytes(32)); $expires=gmdate('Y-m-d H:i:s',time()+(int)config()['token_lifetime']);
         query('INSERT INTO user_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)',[hash('sha256',$token),$u['id'],$expires]);
@@ -69,24 +70,25 @@ try {
         $out=['status'=>'new'];
         $out['name']=textField($a,'name',120,true); $out['phone']=textField($a,'phone',40,true);
         $out['email']=textField($a,'email',190);
-        if ($out['email']!=='' && !filter_var($out['email'],FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Email inválido');
+        if ($out['email']!=='' && !filter_var($out['email'],FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Email invÃ¡lido');
         $out['type']=choice($a,'type',['quote','availability','test_ride','contact','whatsapp'],'contact');
         $out['message']=textField($a,'message',3000);
         $out['motorcycleId']=textField($a,'motorcycleId',32);
         if ($out['motorcycleId']!=='') {
             $m=resource('motorcycles',$out['motorcycleId']);
             if (!visible($m)) fail('NOT_FOUND','Moto no disponible.',404);
-            if ($out['type']==='quote' && !$m['allowQuote']) fail('QUOTE_DISABLED','Cotización no disponible.',422);
+            if ($out['type']==='quote' && !$m['allowQuote']) fail('QUOTE_DISABLED','CotizaciÃ³n no disponible.',422);
             $out['brand']=resource('brands',$m['brandId'])['name']; $out['motorcycle']=$m['model'];
         }
         $mid=$out['motorcycleId']==='' ? null : $out['motorcycleId'];
         query('INSERT INTO leads (name,phone,email,type,message,motorcycle_id,brand_id,brand_snapshot,motorcycle_snapshot) VALUES (?,?,?,?,?,?,?,?,?)',[$out['name'],$out['phone'],$out['email'],$out['type'],$out['message'],$mid,isset($m) ? $m['brandId'] : null,$out['brand'] ?? null,$out['motorcycle'] ?? null]);
         respond(['id'=>db()->lastInsertId()],201);
     }
-    if ($path===['public','leads']) fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
+    if ($path===['public','leads']) fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
     $scope=$path[0] ?? ''; $kind=$path[1] ?? ''; $id=$path[2] ?? null;
     if (count($path)>3 || !in_array($scope,['admin','public'],true)) fail('NOT_FOUND','Ruta no encontrada.',404);
     $user=$scope==='admin' ? identity() : null;
+    if (isset(CONTENT_TABLES[$kind])) handleContent($scope,$kind,$method,$id,$user,$requestId);
     if ($kind==='promotions') handlePromotions($scope,$method,$id,$user,$requestId);
     if ($kind==='leads' && $scope==='admin') {
         authorize($user,['admin','sales']);
@@ -102,17 +104,17 @@ try {
             $a=body();
             $doc['status']=choice($a,'status',['new','contacted','follow_up','closed','discarded'],$doc['status']);
             $assigned=array_key_exists('assignedTo',$a) ? textField($a,'assignedTo',20) : ($doc['assigned_to']===null ? '' : (string)$doc['assigned_to']);
-            if ($assigned!=='' && !query("SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.status='active' AND u.deleted_at IS NULL AND r.code IN ('admin','sales')",[$assigned])->fetchColumn()) throw new InvalidArgumentException('Asignación inválida');
+            if ($assigned!=='' && !query("SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.status='active' AND u.deleted_at IS NULL AND r.code IN ('admin','sales')",[$assigned])->fetchColumn()) throw new InvalidArgumentException('AsignaciÃ³n invÃ¡lida');
             query('UPDATE leads SET status=?,assigned_to=? WHERE id=?',[$doc['status'],$assigned==='' ? null : $assigned,$id]);
             $note=textField($a,'notes',5000);
             if ($note!=='') query('INSERT INTO lead_notes (lead_id,author_id,note) VALUES (?,?,?)',[$id,$user['id'],$note]);
             $result=leadDocument(query('SELECT * FROM leads WHERE id=?',[$id])->fetch());
             audit('lead_updated',$requestId,$user['id']); db()->commit(); respond($result);
         }
-        fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
+        fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
     }
     if (!in_array($kind,['brands','categories','motorcycles'],true)) fail('NOT_FOUND','Ruta no encontrada.',404);
-    if ($scope==='public' && $method!=='GET') fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
+    if ($scope==='public' && $method!=='GET') fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
     if ($scope==='admin') { authorize($user,['admin','editor','marketing']); permit($user,'motorcycles.read'); }
     if ($method==='GET') {
         $rows=$id ? [resource($kind,$id)] : resources($kind);
@@ -135,7 +137,7 @@ try {
         if ($kind==='motorcycles' && $out['published']!==($old['published'] ?? false)) permit($user,'motorcycles.publish');
         if ($kind==='motorcycles') {
             $brand=resource('brands',$out['brandId']); $category=resource('categories',$out['categoryId']);
-            if ($category['brandId']!=='' && $category['brandId']!==$out['brandId']) throw new InvalidArgumentException('Categoría de otra marca');
+            if ($category['brandId']!=='' && $category['brandId']!==$out['brandId']) throw new InvalidArgumentException('CategorÃ­a de otra marca');
             $out['brand']=$brand['name']; $out['category']=$category['name'];
         }
         if ($kind==='categories' && $out['brandId']!=='') resource('brands',$out['brandId']);
@@ -150,12 +152,12 @@ try {
             $key=$kind==='brands' ? 'brand_id' : 'category_id';
             $used=query("SELECT COUNT(*) FROM motorcycles WHERE $key=? AND deleted_at IS NULL",[$old['id']])->fetchColumn();
             if ($kind==='brands') $used+=(int)query('SELECT COUNT(*) FROM categories WHERE brand_id=? AND deleted_at IS NULL',[$old['id']])->fetchColumn();
-            if ($used) fail('IN_USE','Recurso utilizado. Desactívalo.',409);
+            if ($used) fail('IN_USE','Recurso utilizado. DesactÃ­valo.',409);
         }
         deleteResource($kind,$old['id']);
         audit('resource_deleted',$requestId,$user['id']); db()->commit(); respond(['deleted'=>true]);
     }
-    fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
+    fail('METHOD_NOT_ALLOWED','MÃ©todo no permitido.',405);
 } catch (InvalidArgumentException $e) { fail('VALIDATION_ERROR',$e->getMessage(),422); }
 catch (PDOException $e) {
     if ($e->getCode()==='23000') fail('CONFLICT','Ya existe un recurso con ese identificador.',409);
