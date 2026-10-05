@@ -5,6 +5,7 @@ ini_set('log_errors','1');
 require dirname(__DIR__).'/src/bootstrap.php';
 require dirname(__DIR__).'/src/validation.php';
 require dirname(__DIR__).'/src/repository.php';
+require dirname(__DIR__).'/src/promotions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -86,6 +87,7 @@ try {
     $scope=$path[0] ?? ''; $kind=$path[1] ?? ''; $id=$path[2] ?? null;
     if (count($path)>3 || !in_array($scope,['admin','public'],true)) fail('NOT_FOUND','Ruta no encontrada.',404);
     $user=$scope==='admin' ? identity() : null;
+    if ($kind==='promotions') handlePromotions($scope,$method,$id,$user,$requestId);
     if ($kind==='leads' && $scope==='admin') {
         authorize($user,['admin','sales']);
         permit($user,'leads.manage');
