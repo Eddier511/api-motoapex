@@ -1,0 +1,59 @@
+name: Verify and package API
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-only-password
+          MYSQL_DATABASE: motoapex_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest-only-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql
+          coverage: none
+      - name: PHP syntax
+        run: find . -name '*.php' -not -name config.local.php -print0 | xargs -0 -n1 php -l
+      - name: Integration tests
+        run: |
+          php tests/setup.php
+          php -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
+          python3 tests/integration.py
+      - name: Package without credentials
+        run: |
+          python3 bin/package-hostinger.py --output api-motoapex-hostinger.zip
+          python3 tests/package_test.py api-motoapex-hostinger.zip
+      - name: Apache document root, inheritance and CORS
+        run: |
+          mkdir -p "$RUNNER_TEMP/motoapex-deploy"
+          unzip -q api-motoapex-hostinger.zip -d "$RUNNER_TEMP/motoapex-deploy"
+          cp config.local.php "$RUNNER_TEMP/motoapex-deploy/config.local.php"
+          cp .htaccess "$RUNNER_TEMP/motoapex-deploy/.htaccess"
+          docker build -f tests/Dockerfile.apache -t motoapex-apache-test .
+          docker run -d --rm --name motoapex-apache --network host -v "$RUNNER_TEMP/motoapex-deploy:/var/www/motoapex:ro" motoapex-apache-test
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8081/v1/health && break || sleep 1; done
+          python3 tests/verify-hosting.py --base http://127.0.0.1:8081/v1 --origin https://admin.example.test
+          python3 tests/apache_security.py
+      - name: Apache logs on failure
+        if: failure()
+        run: docker logs motoapex-apache || true
+      - name: Stop test Apache
+        if: always()
+        run: docker stop motoapex-apache || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: api-motoapex-hostinger
+          path: api-motoapex-hostinger.zip

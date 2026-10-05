@@ -1,0 +1,18 @@
+Options -Indexes
+DirectoryIndex index.php
+# This public directory must override the private repository parent's denial.
+# Authentication and CORS are enforced by PHP, not by blocking the document root.
+Require all granted
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteRule ^(?:src|bin|database|docs|tests|public|public_html)(?:/|$) - [F,L,NC]
+RewriteRule (^|/)\. - [F,L]
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [QSA,L]
+<FilesMatch "(?i)(^\.|^config(?:\.|$)|\.(?:sql|log|zip|bak|old|env|ini|py|md)$)">
+    Require all denied
+</FilesMatch>
+<FilesMatch "(?i)^(?!index\.php$).*\.php$">
+    Require all denied
+</FilesMatch>
