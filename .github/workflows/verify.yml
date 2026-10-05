@@ -1,0 +1,38 @@
+name: Verify and package API
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-only-password
+          MYSQL_DATABASE: motoapex_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest-only-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql
+          coverage: none
+      - name: PHP syntax
+        run: find . -name '*.php' -not -name config.local.php -print0 | xargs -0 -n1 php -l
+      - name: Integration tests
+        run: |
+          php tests/setup.php
+          php -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
+          python3 tests/integration.py
+      - name: Package without credentials
+        run: zip -r api-motoapex-hostinger.zip public src bin database config.example.php README.md docs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-motoapex-hostinger
+          path: api-motoapex-hostinger.zip
