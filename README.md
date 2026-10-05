@@ -7,10 +7,10 @@ API REST v1 para PHP 8.3+ y MySQL 8 (PDO MySQL). Web y admin son builds estátic
 1. Crea el sitio/subdominio de la API, activa SSL y selecciona PHP 8.3 o superior con PDO MySQL. Confirma que los tres sitios y la base están en el mismo servidor: `127.0.0.1` solo funciona desde ese servidor.
 2. Descarga el artefacto `api-motoapex-hostinger` de una ejecución verde de GitHub Actions. No hay despliegue automático a producción.
 3. En la carpeta del sitio, coloca `src`, `bin`, `database` y `config.local.php` **fuera de `public_html`**. Copia únicamente `public/index.php` y `public/.htaccess` dentro de `public_html`. `index.php` espera encontrar `src` un nivel por encima de la raíz pública. No copies el `.htaccess` de la raíz del repositorio a `public_html`.
-4. Copia `config.example.php` como `config.local.php` en esa carpeta privada, cambia la contraseña desde el servidor y reemplaza `allowed_origins` por las URLs HTTPS exactas de web/admin. Los dominios del ejemplo aún no están confirmados. No subas esta configuración a GitHub.
+4. Copia `config.example.php` como `config.local.php` en esa carpeta privada, cambia la contraseña desde el servidor y reemplaza `allowed_origins` por las URLs HTTPS exactas de web/admin. Los cuatro orígenes de config.example.php están confirmados: sitios temporales de Hostinger y dominios definitivos. Retira los temporales cuando finalice la migración. No subas esta configuración a GitHub.
 5. Tu esquema inicial ya está importado. Aplica únicamente `database/002_api_support.sql`, una sola vez y después de un respaldo: agrega los límites de peticiones y campos de presentación para la web. No vuelvas a importar `schema.sql` en esa base. Para una base de prueba vacía, importa primero `schema.sql` y luego `002_api_support.sql`.
 6. Desde SSH/terminal de Hostinger, define temporalmente `MOTOAPEX_ADMIN_PASSWORD` con una contraseña única de 16–72 bytes y ejecuta `php bin/create-admin.php tu-correo 'Tu nombre'`. El script solo se ejecuta por CLI. No hay instalador web ni usuario predeterminado. Si tu plan no incluye terminal, genera el hash con PHP en un entorno de confianza y crea el registro por phpMyAdmin; nunca uses un generador online de contraseñas/hashes.
-7. Prueba `https://TU_API/v1/health`, login, guardado desde el admin y lectura desde la web. Las credenciales de la base no son las del usuario administrador.
+7. Prueba `https://darksalmon-quetzal-730302.hostingersite.com/v1/health`, login, guardado desde el admin y lectura desde la web. Las credenciales de la base no son las del usuario administrador.
 
 ## Estado de esta primera versión
 
@@ -33,3 +33,13 @@ Consulta [contrato](docs/contract.md) y [prompts de integración](docs/integrati
 ## Compatibilidad del esquema recibido
 
 La importación de prueba en MySQL 8 detectó que motorcycle_color_images usa ON DELETE CASCADE sobre color_id, base de una columna generada STORED. MySQL rechaza esa combinación. schema.sql cambia esa relación a RESTRICT para instalaciones nuevas; la API usa borrado lógico y elimina explícitamente las imágenes al reemplazar una galería. No se modifica automáticamente la base de Hostinger ya importada. Si Hostinger usa MariaDB y completó la importación, conserva su estructura; si hubo errores de importación, verifica SHOW TABLES y SHOW CREATE TABLE motorcycle_color_images antes de aplicar la migración adicional.
+
+## URLs confirmadas
+
+| Servicio | Temporal | Definitiva |
+| --- | --- | --- |
+| Web | https://wheat-stinkbug-153908.hostingersite.com | https://motoapexcr.com |
+| Admin | https://darkorange-ant-895420.hostingersite.com | https://admin.motoapexcr.com |
+| API | https://darksalmon-quetzal-730302.hostingersite.com/v1 | https://api.motoapexcr.com/v1 |
+
+CORS permite los orígenes de web/admin, no necesita agregar el dominio de la API. Tener el sitio creado no confirma que el backend esté instalado; verificar /v1/health después del despliegue.
