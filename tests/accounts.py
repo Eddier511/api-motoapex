@@ -123,6 +123,7 @@ call('admin/settings/timezone','PUT',{'value':'Mars/Test'},a['token'],422)
 call('admin/settings/default_currency','PUT',{'value':'USD'},a['token'],reauth=reauth(a,'settings.manage'))
 assert next(x for x in call('public/settings') if x['key']=='default_currency')['value']=='USD'
 # Real SMTP send, generic body, no token returned, single use, expiration, revocation.
+control('uppercase-email',u['id'])  # Existing imports may preserve email case.
 r=call('auth/password/forgot','POST',{'email':new['email']})
 assert r==call('auth/password/forgot','POST',{'email':'absent@example.test'}) and 'token' not in r
 assert len(messages)==0  # HTTP must never contact SMTP

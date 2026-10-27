@@ -49,14 +49,20 @@ function processRecoveryJob(array $job): string {
         $email=decryptQueueEmail($job['encrypted_email']);
         $candidate=query("SELECT id FROM users WHERE email=? AND status='active' AND deleted_at IS NULL",[$email])->fetchColumn();
         if (!$candidate) { finishMailJob($job,'discarded'); return 'discarded'; }
-        db()->beginTransaction(); $u=accountRow((string)$candidate,true);
-        if ($u['status']!=='active' || $u['email']!==$email) { db()->rollBack(); finishMailJob($job,'discarded'); return 'discarded'; }
+        db()->beginTransaction();
+        $u=query('SELECT id,email,status,deleted_at FROM users WHERE id=? FOR UPDATE',[$candidate])->fetch();
+        if (!$u || $u['deleted_at']!==null || $u['status']!=='active' || strtolower($u['email'])!==$email) { db()->rollBack(); finishMailJob($job,'discarded'); return 'discarded'; }
         $token=bin2hex(random_bytes(32)); $tokenHash=hash('sha256',$token);
         query('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 30 MINUTE))',[$u['id'],$tokenHash]);
         db()->commit();
         // No database transaction or user row lock is held during network I/O.
-        sendResetMail($email,$token); unset($token);
-        db()->beginTransaction(); accountRow((string)$candidate,true);
+        sendResetMail($u['email'],$token); unset($token);
+        db()->beginTransaction();
+        $current=query('SELECT id,email,status,deleted_at FROM users WHERE id=? FOR UPDATE',[$candidate])->fetch();
+        if (!$current || $current['deleted_at']!==null || $current['status']!=='active' || strtolower($current['email'])!==$email) {
+            query('UPDATE password_reset_tokens SET used_at=UTC_TIMESTAMP() WHERE token_hash=? AND used_at IS NULL',[$tokenHash]);
+            finishMailJob($job,'discarded'); db()->commit(); return 'discarded';
+        }
         $owned=query("SELECT id FROM password_recovery_jobs WHERE id=? AND status='processing' AND lease_hash=? AND lease_until>UTC_TIMESTAMP() FOR UPDATE",[$job['id'],$job['lease_hash']])->fetchColumn();
         if (!$owned) {
             query('UPDATE password_reset_tokens SET used_at=UTC_TIMESTAMP() WHERE token_hash=? AND used_at IS NULL',[$tokenHash]); db()->commit(); return 'discarded';
