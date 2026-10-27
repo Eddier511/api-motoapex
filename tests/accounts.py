@@ -6,6 +6,10 @@ import urllib.request, urllib.error, urllib.parse
 fixtures=json.loads(Path(__file__).with_name('account-fixtures.json').read_text())
 BASE='http://127.0.0.1:8080/v1/'
 messages=[]
+smtp_pause=False
+smtp_fail=False
+smtp_started=threading.Event()
+mail_gate=threading.Event()
 class SMTP(socketserver.StreamRequestHandler):
     def handle(self):
         self.wfile.write(b'220 localhost test SMTP\r\n'); self.wfile.flush()
@@ -20,7 +24,10 @@ class SMTP(socketserver.StreamRequestHandler):
             else:
                 command=line.upper()
                 if command.startswith((b'EHLO',b'HELO')): self.wfile.write(b'250 localhost\r\n')
-                elif command.startswith(b'DATA'): self.wfile.write(b'354 data\r\n'); data=True
+                elif command.startswith(b'DATA'):
+                    if smtp_pause: smtp_started.set(); mail_gate.wait(5)
+                    if smtp_fail: self.wfile.write(b'451 test delivery failure\r\n')
+                    else: self.wfile.write(b'354 data\r\n'); data=True
                 elif command.startswith(b'QUIT'): self.wfile.write(b'221 bye\r\n'); self.wfile.flush(); return
                 else: self.wfile.write(b'250 ok\r\n')
             self.wfile.flush()
@@ -76,6 +83,12 @@ control('rates')
 last={k:own[k] for k in ('name','email','phone','avatarUrl','role','status')}
 for changes in ({'status':'inactive'},{'role':'sales'}): call('admin/users/'+a['id'],'PUT',dict(last,**changes),a['token'],409,reauth(a,'users.manage'))
 call('admin/users/'+a['id'],'DELETE',token=a['token'],expected=409,reauth=reauth(a,'users.manage'))
+control('rates')
+# A victim account must still accept correct credentials after hostile failures.
+for _ in range(8): call('auth/login','POST',{'email':a['email'],'password':'incorrect'},expected=401)
+call('auth/login','POST',{'email':a['email'],'password':'incorrect'},expected=429)
+assert 'token' in login(a)
+control('rates')
 # Mandatory password challenge cannot be used as a full Bearer.
 new={'email':payload['email'],'password':payload['password']}
 c=login(new); assert c['challenge']=='password_change' and 'token' not in c
@@ -112,6 +125,15 @@ assert next(x for x in call('public/settings') if x['key']=='default_currency')[
 # Real SMTP send, generic body, no token returned, single use, expiration, revocation.
 r=call('auth/password/forgot','POST',{'email':new['email']})
 assert r==call('auth/password/forgot','POST',{'email':'absent@example.test'}) and 'token' not in r
+assert len(messages)==0  # HTTP must never contact SMTP
+smtp_pause=True
+with concurrent.futures.ThreadPoolExecutor(2) as mail_pool:
+    jobs=[mail_pool.submit(subprocess.run,['php','bin/process-mail-queue.php','20'],check=True,capture_output=True) for _ in range(2)]
+    assert smtp_started.wait(10)
+    try: control('lock-user',u['id'])  # SMTP must not hold this user row lock
+    finally: mail_gate.set()
+    for job in jobs: job.result()
+smtp_pause=False
 assert len(messages)==1
 def reset_token():
     msg=mailparser.message_from_bytes(messages[-1]); text=msg.get_payload(decode=True).decode();
@@ -121,8 +143,22 @@ call('auth/password/reset','POST',{'token':reset,'newPassword':'Reset-password-1
 call('auth/me',token=new['token'],expected=401)
 call('auth/password/reset','POST',{'token':reset,'newPassword':'Replay-password-123456'},expected=401)
 new['password']='Reset-password-123456'; new['token']=login(new)['token']
-call('auth/password/forgot','POST',{'email':new['email']}); control('expire-reset')
+call('auth/password/forgot','POST',{'email':new['email']})
+subprocess.run(['php','bin/process-mail-queue.php','20'],check=True,capture_output=True)
+control('expire-reset')
 call('auth/password/reset','POST',{'token':reset_token(),'newPassword':'Expired-password-123456'},expected=401)
+control('rates')
+# Retry bounds and lease recovery; no real email or production data.
+smtp_fail=True
+call('auth/password/forgot','POST',{'email':a['email']})
+for _ in range(3):
+    control('queue-ready')
+    subprocess.run(['php','bin/process-mail-queue.php','20'],check=True,capture_output=True)
+control('queue-assert')
+smtp_fail=False
+call('auth/password/forgot','POST',{'email':a['email']})
+control('queue-stale')
+subprocess.run(['php','bin/process-mail-queue.php','20'],check=True,capture_output=True)
 control('rates')
 # Enroll and confirm actual TOTP. Secret is only present in protected provisioning URI.
 call('auth/mfa/enroll','POST',{},new['token'],401)

@@ -16,23 +16,23 @@ function resources(string $kind): array {
     $table=tableFor($kind);
     return array_map(fn($r)=>hydrate($kind,$r),query("SELECT * FROM $table WHERE deleted_at IS NULL ORDER BY id DESC")->fetchAll());
 }
-function hydrate(string $kind, array $r): array {
+function hydrate(string $kind, array $r, ?array $batch=null): array {
     $out=['id'=>(string)$r['id'],'slug'=>$r['slug'],'createdAt'=>iso($r['created_at']),'updatedAt'=>iso($r['updated_at'])];
     if ($kind!=='motorcycles') $out+=['name'=>$r['name'],'description'=>$r['description'] ?? '', 'status'=>$r['status'],'order'=>(int)$r['sort_order']];
     if ($kind==='brands') {
-        $out+=['primaryColor'=>$r['primary_color'],'secondaryColor'=>$r['secondary_color'],'accentLight'=>$r['accent_light'],'tagline'=>$r['tagline'],'slogan'=>$r['slogan'],'heroImageUrl'=>$r['hero_image_url'] ?? '', 'tileImageUrl'=>$r['tile_image_url'] ?? '', 'logo'=>mediaUrl($r['logo_media_id'])];
+        $out+=['primaryColor'=>$r['primary_color'],'secondaryColor'=>$r['secondary_color'],'accentLight'=>$r['accent_light'],'tagline'=>$r['tagline'],'slogan'=>$r['slogan'],'heroImageUrl'=>$r['hero_image_url'] ?? '', 'tileImageUrl'=>$r['tile_image_url'] ?? '', 'logo'=>($batch===null ? mediaUrl($r['logo_media_id']) : ($batch['media'][$r['logo_media_id']] ?? ''))];
     } elseif ($kind==='categories') {
         $out['brandId']=$r['brand_id']===null ? '' : (string)$r['brand_id'];
     } else {
-        $b=query('SELECT name FROM brands WHERE id=?',[$r['brand_id']])->fetchColumn();
-        $c=query('SELECT name FROM categories WHERE id=?',[$r['category_id']])->fetchColumn();
+        $b=$batch===null ? query('SELECT name FROM brands WHERE id=?',[$r['brand_id']])->fetchColumn() : $batch['brands'][$r['brand_id']]['name'];
+        $c=$batch===null ? query('SELECT name FROM categories WHERE id=?',[$r['category_id']])->fetchColumn() : $batch['categories'][$r['category_id']]['name'];
         $out+=['brandId'=>(string)$r['brand_id'],'categoryId'=>(string)$r['category_id'],'brand'=>$b,'category'=>$c,'model'=>$r['model'],'version'=>$r['version'],'year'=>(int)$r['model_year'],'sku'=>$r['sku'] ?? '', 'price'=>$r['price']===null ? 0 : (float)$r['price'],'promoPrice'=>$r['promo_price']===null ? null : (float)$r['promo_price'],'currency'=>$r['currency'],'status'=>$r['availability_status'],'published'=>$r['publication_status']==='published','featured'=>(bool)$r['featured'],'isNew'=>(bool)$r['is_new'],'showPrice'=>(bool)$r['show_price'],'allowQuote'=>(bool)$r['allow_quote'],'shortDescription'=>$r['short_description'] ?? '', 'description'=>$r['description'] ?? '', 'displacement'=>(float)($r['displacement_cc'] ?? 0),'hp'=>(float)($r['horsepower'] ?? 0),'tagline'=>$r['tagline']];
-        $out['inventory']=(int)query('SELECT COALESCE(SUM(quantity),0) FROM inventory_stock WHERE motorcycle_id=?',[$r['id']])->fetchColumn();
-        $out['specs']=array_map(fn($s)=>['group'=>$s['group_name'] ?? 'General','label'=>$s['name'],'value'=>$s['value'].($s['unit'] ? ' '.$s['unit'] : '')],query('SELECT * FROM motorcycle_custom_specs WHERE motorcycle_id=? ORDER BY sort_order,id',[$r['id']])->fetchAll());
-        $out['colors']=array_map(function($color) {
-            $images=array_map(fn($i)=>['id'=>(string)$i['id'],'url'=>$i['url'],'alt'=>$i['alt_text'] ?? '', 'label'=>$i['label'] ?? '', 'order'=>(int)$i['sort_order'],'isPrimary'=>(bool)$i['is_primary']],query('SELECT i.*,a.url FROM motorcycle_color_images i JOIN media_assets a ON a.id=i.media_id AND a.deleted_at IS NULL WHERE i.color_id=? ORDER BY i.sort_order,i.id',[$color['id']])->fetchAll());
+        $out['inventory']=$batch===null ? (int)query('SELECT COALESCE(SUM(quantity),0) FROM inventory_stock WHERE motorcycle_id=?',[$r['id']])->fetchColumn() : (int)($batch['inventory'][$r['id']] ?? 0);
+        $out['specs']=array_map(fn($s)=>['group'=>$s['group_name'] ?? 'General','label'=>$s['name'],'value'=>$s['value'].($s['unit'] ? ' '.$s['unit'] : '')],($batch===null ? query('SELECT * FROM motorcycle_custom_specs WHERE motorcycle_id=? ORDER BY sort_order,id',[$r['id']])->fetchAll() : ($batch['specs'][$r['id']] ?? [])));
+        $out['colors']=array_map(function($color) use($batch) {
+            $images=array_map(fn($i)=>['id'=>(string)$i['id'],'url'=>$i['url'],'alt'=>$i['alt_text'] ?? '', 'label'=>$i['label'] ?? '', 'order'=>(int)$i['sort_order'],'isPrimary'=>(bool)$i['is_primary']],($batch===null ? query('SELECT i.*,a.url FROM motorcycle_color_images i JOIN media_assets a ON a.id=i.media_id AND a.deleted_at IS NULL WHERE i.color_id=? ORDER BY i.sort_order,i.id',[$color['id']])->fetchAll() : ($batch['images'][$color['id']] ?? [])));
             return ['id'=>(string)$color['id'],'name'=>$color['name'],'hex'=>$color['hex'],'status'=>$color['status'],'available'=>(bool)$color['available'],'order'=>(int)$color['sort_order'],'images'=>$images];
-        },query('SELECT * FROM motorcycle_colors WHERE motorcycle_id=? ORDER BY sort_order,id',[$r['id']])->fetchAll());
+        },($batch===null ? query('SELECT * FROM motorcycle_colors WHERE motorcycle_id=? ORDER BY sort_order,id',[$r['id']])->fetchAll() : ($batch['colors'][$r['id']] ?? [])));
     }
     return $out;
 }
@@ -55,6 +55,7 @@ function writeRow(string $table, array $fields, ?string $id): string {
     return db()->lastInsertId();
 }
 function saveResource(string $kind, array $a, ?array $old, string $actor): array {
+    if ($kind==='motorcycles' && $a['inventory']!==($old['inventory'] ?? 0)) permit(['id'=>$actor],'inventory.manage');
     $id=$old['id'] ?? null;
     $fields=['slug'=>$a['slug']];
     if ($kind!=='motorcycles') $fields+=['name'=>$a['name'],'description'=>$a['description'],'status'=>$a['status'],'sort_order'=>$a['order']];

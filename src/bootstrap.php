@@ -32,6 +32,7 @@ function db(): PDO {
 }
 
 function query(string $sql, array $params = []): PDOStatement {
+    $GLOBALS['dbQueries']=($GLOBALS['dbQueries'] ?? 0)+1;
     $s = db()->prepare($sql);
     $s->execute($params);
     return $s;
@@ -52,7 +53,11 @@ function fail(string $code, string $message, int $status): never {
 }
 
 function metric(int $status): void {
-    error_log(json_encode(['service'=>'motoapex','event'=>'http_request','requestId'=>$GLOBALS['requestId'] ?? null,'status'=>$status,'durationMs'=>round((microtime(true)-($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true)))*1000,2)],JSON_THROW_ON_ERROR));
+    error_log(json_encode(['service'=>'motoapex','event'=>'http_request','requestId'=>$GLOBALS['requestId'] ?? null,'status'=>$status,'dbQueries'=>$GLOBALS['dbQueries'] ?? 0,'durationMs'=>round((microtime(true)-($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true)))*1000,2)],JSON_THROW_ON_ERROR));
+}
+function configurationUnavailable(string $code,string $message): never {
+    if (PHP_SAPI==='cli') throw new RuntimeException($code);
+    fail($code,$message,503);
 }
 
 function body(): array {
@@ -90,11 +95,11 @@ function visible(array $m): bool {
     return $m['published'] && activeResource('brands', $m['brandId']) && activeResource('categories', $m['categoryId']);
 }
 
-function publicMotorcycle(array $m): array {
-    $b = resource('brands', $m['brandId']);
-    $c = resource('categories', $m['categoryId']);
+function publicMotorcycle(array $m, ?array $brand=null, ?array $category=null): array {
+    $b = $brand ?? resource('brands', $m['brandId']);
+    $c = $category ?? resource('categories', $m['categoryId']);
     $out = [
-        'id'=>$m['id'], 'slug'=>$m['slug'], 'brandId'=>$m['brandId'], 'brandName'=>$b['name'], 'brandColor'=>$b['primaryColor'],
+        'id'=>$m['id'], 'slug'=>$m['slug'], 'brandId'=>$m['brandId'], 'brandName'=>$b['name'], 'brandColor'=>($b['primaryColor'] ?? $b['primary_color']),
         'model'=>$m['model'], 'version'=>$m['version'], 'year'=>$m['year'], 'categoryId'=>$m['categoryId'], 'categoryName'=>$c['name'],
         'currency'=>$m['currency'], 'description'=>$m['description'], 'shortDescription'=>$m['shortDescription'],
         'availability'=>['available'=>'available','reserved'=>'reserved','coming_soon'=>'coming-soon','sold_out'=>'sold-out'][$m['status']],

@@ -1,18 +1,18 @@
 # MotoApex API
 
-API REST v1 para PHP 8.3+ y MySQL 8 (PDO MySQL). Web y admin son builds estáticos independientes; esta API se ejecuta con PHP, sin Node ni Composer. Código organizado en entrada HTTP, acceso a datos, validación, esquema SQL y pruebas.
+API REST v1 para PHP 8.3.36+/8.4.27+/8.5.12+ y MySQL 8 (PDO MySQL). Web y admin son builds estáticos independientes; esta API se ejecuta con PHP, sin Node ni Composer. Código organizado en entrada HTTP, acceso a datos, validación, esquema SQL y pruebas.
 
 ## Instalar en Hostinger
 
-1. Crea el sitio/subdominio de la API, activa SSL y selecciona PHP 8.3 o superior con PDO MySQL y Sodium. Confirma que los tres sitios y la base están en el mismo servidor: `127.0.0.1` solo funciona desde ese servidor.
+1. Crea el sitio/subdominio de la API, activa SSL y selecciona PHP 8.3.36+, 8.4.27+ o 8.5.12+ con PDO MySQL y Sodium. Confirma que los tres sitios y la base están en el mismo servidor: `127.0.0.1` solo funciona desde ese servidor.
 
-2. Descarga el artefacto `api-motoapex-hostinger` de una ejecución verde de GitHub Actions. CI y el generador local usan el mismo layout `public_html/`; no se debe subir el ZIP del código fuente de GitHub. No hay despliegue automático a producción.
+2. Descarga el artefacto `api-motoapex-hostinger-8.3.36` de una ejecución verde de GitHub Actions. CI y el generador local usan el mismo layout `public_html/`; no se debe subir el ZIP del código fuente de GitHub. No hay despliegue automático a producción.
 
 3. En la carpeta del sitio, coloca `src`, `vendor`, `bin`, `database` y `config.local.php` **fuera de `public_html`**. Copia únicamente `public/index.php` y `public/.htaccess` dentro de `public_html`. `index.php` espera encontrar `src` un nivel por encima de la raíz pública. No copies el `.htaccess` de la raíz del repositorio a `public_html`.
 
 4. Copia `config.example.php` como `config.local.php` en esa carpeta privada, cambia la contraseña desde el servidor y reemplaza `allowed_origins` por las URLs HTTPS exactas de web/admin. Los cuatro orígenes de config.example.php están confirmados: sitios temporales de Hostinger y dominios definitivos. Retira los temporales cuando finalice la migración. No subas esta configuración a GitHub.
 
-5. Tu esquema inicial ya está importado. Aplica solo las migraciones pendientes 002, 003, 004 y 005, en ese orden y después de un respaldo. 005 revoca las sesiones anteriores. No vuelvas a importar `schema.sql` en esa base. Para una base de prueba vacía, importa primero `schema.sql` y luego las migraciones 002 a 005.
+5. Tu esquema inicial ya está importado. Aplica solo las migraciones pendientes 002, 003, 004, 005 y 006, en ese orden y después de un respaldo. 005 revoca las sesiones anteriores. No vuelvas a importar `schema.sql` en esa base. Para una base de prueba vacía, importa primero `schema.sql` y luego las migraciones 002 a 006.
 
 6. Desde SSH/terminal de Hostinger, define temporalmente `MOTOAPEX_ADMIN_PASSWORD` con una contraseña única de 16–72 bytes y ejecuta `php bin/create-admin.php tu-correo 'Tu nombre'`. El script solo se ejecuta por CLI. No hay instalador web ni usuario predeterminado. Si tu plan no incluye terminal, genera el hash con PHP en un entorno de confianza y crea el registro por phpMyAdmin; nunca uses un generador online de contraseñas/hashes.
 
@@ -58,3 +58,7 @@ CORS permite los orígenes de web/admin, no necesita agregar el dominio de la AP
 
 Usuarios, configuración, recuperación SMTP y MFA están implementados en el PR de cuentas. Aplicar 005_accounts.sql después de 004; revoca sesiones existentes. Consultar docs/contract.md y docs/accounts-install.md para configurar SMTP y cifrado sin exponer secretos.
 
+
+## Actualización de seguridad
+
+Ver docs/security-hardening.md. Requiere migración 006 y cron privado cada minuto para bin/process-mail-queue.php. La API encola recuperación y no realiza SMTP durante HTTP. El ZIP no instala PHP ni cambia Hostinger. No sobrescribir config.local.php.

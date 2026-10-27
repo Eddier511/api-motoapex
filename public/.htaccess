@@ -1,11 +1,19 @@
 Options -Indexes
+LimitRequestBody 262144
+<IfModule mod_headers.c>
+    Header unset X-Powered-By
+    Header always unset X-Powered-By
+</IfModule>
 DirectoryIndex index.php
 # This public directory must override the private repository parent's denial.
 # Authentication and CORS are enforced by PHP, not by blocking the document root.
 Require all granted
 RewriteEngine On
+# Reject unused multipart input before PHP's automatic body parser runs.
+RewriteCond %{HTTP:Content-Type} ^multipart/ [NC]
+RewriteRule ^ - [F,L]
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-RewriteRule ^(?:src|bin|database|docs|tests|public|public_html)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:src|bin|database|docs|tests|vendor|public|public_html)(?:/|$) - [F,L,NC]
 RewriteRule (^|/)\. - [F,L]
 RewriteRule ^index\.php$ - [L]
 RewriteCond %{REQUEST_FILENAME} !-f

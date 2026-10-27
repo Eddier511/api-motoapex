@@ -39,22 +39,22 @@ function promotionRow(string $id, bool $lock=false): array {
     if (!$row) fail('NOT_FOUND','Promoción no encontrada.',404);
     return $row;
 }
-function promotionDocument(array $row, bool $public): ?array {
+function promotionDocument(array $row, bool $public, ?array $batch=null): ?array {
     // Public validity uses the same UTC database clock as catalog queries.
-    if ($public && !query("SELECT id FROM promotions WHERE id=? AND status='active' AND deleted_at IS NULL AND starts_at<=UTC_TIMESTAMP() AND ends_at>=UTC_TIMESTAMP()",[$row['id']])->fetchColumn()) return null;
-    $brand=brandSummary($row['brand_id'],$public);
+    if ($public && $batch===null && !query("SELECT id FROM promotions WHERE id=? AND status='active' AND deleted_at IS NULL AND starts_at<=UTC_TIMESTAMP() AND ends_at>=UTC_TIMESTAMP()",[$row['id']])->fetchColumn()) return null;
+    $brand=$batch===null ? brandSummary($row['brand_id'],$public) : ($batch['brands'][$row['brand_id']] ?? null);
     if ($public && $row['brand_id']!==null && $brand===null) return null;
-    $image=mediaUrl($row['image_media_id']);
+    $image=$batch===null ? mediaUrl($row['image_media_id']) : ($batch['media'][$row['image_media_id']] ?? '');
     if ($public && (!filter_var($image,FILTER_VALIDATE_URL) || parse_url($image,PHP_URL_SCHEME)!=='https' || parse_url($image,PHP_URL_USER)!==null || parse_url($image,PHP_URL_PASS)!==null)) return null;
     // Reject unsafe legacy destinations rather than exposing them publicly.
     if ($public) {
         try { safeDestination(['buttonHref'=>$row['button_href']]); }
         catch (InvalidArgumentException) { return null; }
     }
-    $relations=query('SELECT * FROM promotion_motorcycles WHERE promotion_id=? ORDER BY id',[$row['id']])->fetchAll();
+    $relations=$batch===null ? query('SELECT * FROM promotion_motorcycles WHERE promotion_id=? ORDER BY id',[$row['id']])->fetchAll() : ($batch['relations'][$row['id']] ?? []);
     $items=[];
     foreach ($relations as $relation) {
-        $m=query('SELECT m.id,m.slug,m.model,m.version,m.model_year,m.currency,m.show_price,m.allow_quote,m.publication_status,m.deleted_at,b.id AS brand_id,b.name AS brand_name,b.slug AS brand_slug,b.primary_color,b.status AS brand_status,b.deleted_at AS brand_deleted,c.status AS category_status,c.deleted_at AS category_deleted FROM motorcycles m JOIN brands b ON b.id=m.brand_id JOIN categories c ON c.id=m.category_id WHERE m.id=?',[$relation['motorcycle_id']])->fetch();
+        $m=$batch===null ? promotionMotorcycles([$relation['motorcycle_id']])[$relation['motorcycle_id']] ?? null : ($batch['motorcycles'][$relation['motorcycle_id']] ?? null);
         if ($public && (!$m || $m['deleted_at']!==null || $m['publication_status']!=='published' || $m['brand_status']!=='active' || $m['brand_deleted']!==null || $m['category_status']!=='active' || $m['category_deleted']!==null || $relation['currency']!==$m['currency'] || ($row['brand_id']!==null && (string)$row['brand_id']!==(string)$m['brand_id']))) continue;
         $item=['id'=>(string)$relation['id'],'motorcycleId'=>(string)$relation['motorcycle_id'],'currency'=>$relation['currency'],'motorcycle'=>$m ? ['id'=>(string)$m['id'],'slug'=>$m['slug'],'model'=>$m['model'],'version'=>$m['version'],'year'=>(int)$m['model_year'],'showPrice'=>(bool)$m['show_price'],'allowQuote'=>(bool)$m['allow_quote'],'brand'=>['id'=>(string)$m['brand_id'],'name'=>$m['brand_name'],'slug'=>$m['brand_slug'],'primaryColor'=>$m['primary_color']]] : null];
         if (!$public || ($m && $m['show_price'])) $item+=['originalPrice'=>(float)$relation['original_price'],'promoPrice'=>(float)$relation['promo_price']];
@@ -65,6 +65,23 @@ function promotionDocument(array $row, bool $public): ?array {
     $out=['id'=>(string)$row['id'],'title'=>strip_tags($row['title']),'slug'=>$row['slug'],'description'=>strip_tags($row['description'] ?? ''),'imageUrl'=>$image,'brandId'=>$row['brand_id']===null ? null : (string)$row['brand_id'],'brand'=>$brand,'motorcycles'=>$items,'startsAt'=>iso($row['starts_at']),'endsAt'=>iso($row['ends_at']),'status'=>$row['status'],'featured'=>(bool)$row['featured'],'showOnHome'=>(bool)$row['show_on_home'],'order'=>(int)$row['sort_order'],'buttonLabel'=>strip_tags($row['button_label']),'buttonHref'=>$row['button_href']];
     if (!$public) $out+=['createdAt'=>iso($row['created_at']),'updatedAt'=>iso($row['updated_at'])];
     return $out;
+}
+function promotionMotorcycles(array $ids): array {
+    if (!$ids) return [];
+    return keyedRows(query('SELECT m.id,m.slug,m.model,m.version,m.model_year,m.currency,m.show_price,m.allow_quote,m.publication_status,m.deleted_at,b.id AS brand_id,b.name AS brand_name,b.slug AS brand_slug,b.primary_color,b.status AS brand_status,b.deleted_at AS brand_deleted,c.status AS category_status,c.deleted_at AS category_deleted FROM motorcycles m JOIN brands b ON b.id=m.brand_id JOIN categories c ON c.id=m.category_id WHERE m.id IN ('.inParameters($ids).')',$ids)->fetchAll());
+}
+function promotionBatch(array $rows,bool $public): array {
+    $batch=['brands'=>[],'media'=>[],'relations'=>[],'motorcycles'=>[]]; if (!$rows) return $batch;
+    $brandIds=array_values(array_unique(array_filter(array_column($rows,'brand_id'),fn($id)=>$id!==null)));
+    if ($brandIds) {
+        $brands=query('SELECT id,name,slug,primary_color FROM brands WHERE id IN ('.inParameters($brandIds).')'.($public ? " AND status='active' AND deleted_at IS NULL" : ''),$brandIds)->fetchAll();
+        foreach ($brands as $b) $batch['brands'][$b['id']]=['id'=>(string)$b['id'],'name'=>$b['name'],'slug'=>$b['slug'],'primaryColor'=>$b['primary_color']];
+    }
+    $batch['media']=mediaMap(array_column($rows,'image_media_id'));
+    $ids=array_column($rows,'id'); $relations=boundedRows('SELECT * FROM promotion_motorcycles WHERE promotion_id IN ('.inParameters($ids).') ORDER BY id',$ids);
+    $batch['relations']=groupedRows($relations,'promotion_id');
+    $batch['motorcycles']=promotionMotorcycles(array_values(array_unique(array_column($relations,'motorcycle_id'))));
+    return $batch;
 }
 function savePromotion(array $a, ?array $old, string $actor): array {
     if ($a['brandId']!==null && !query('SELECT id FROM brands WHERE id=? AND deleted_at IS NULL FOR UPDATE',[$a['brandId']])->fetchColumn()) throw new InvalidArgumentException('Marca inexistente o eliminada');
@@ -90,8 +107,11 @@ function handlePromotions(string $scope, string $method, ?string $id, ?array $us
     if ($method==='GET') {
         limit('promotions-read',300);
         $public=$scope==='public';
-        $rows=$id!==null ? [promotionRow($id)] : query("SELECT * FROM promotions WHERE deleted_at IS NULL".($public ? " AND status='active' AND starts_at<=UTC_TIMESTAMP() AND ends_at>=UTC_TIMESTAMP()" : '').' ORDER BY sort_order,id')->fetchAll();
-        $data=array_values(array_filter(array_map(fn($row)=>promotionDocument($row,$public),$rows),fn($row)=>$row!==null));
+        $where="p.deleted_at IS NULL".($public ? " AND p.status='active' AND p.starts_at<=UTC_TIMESTAMP() AND p.ends_at>=UTC_TIMESTAMP() AND (p.brand_id IS NULL OR EXISTS (SELECT 1 FROM brands b WHERE b.id=p.brand_id AND b.status='active' AND b.deleted_at IS NULL))" : '');
+        $rows=$id!==null ? [promotionRow($id)] : listRows('promotions p',$where,[],'p');
+        // Detail validity remains checked against the database, including its UTC clock.
+        $batch=$id===null ? promotionBatch($rows,$public) : null;
+        $data=boundedDocuments($rows,fn($row)=>promotionDocument($row,$public,$batch));
         if ($id!==null && !$data) fail('NOT_FOUND','Promoción no encontrada.',404);
         respond($id!==null ? $data[0] : $data);
     }

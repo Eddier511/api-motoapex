@@ -1,4 +1,5 @@
-FROM php:8.3-apache
+FROM php:8.3.36-apache
 RUN docker-php-ext-install pdo_mysql && a2enmod rewrite
 COPY tests/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+COPY config/php-security.ini /usr/local/etc/php/conf.d/motoapex-security.ini
 RUN printf 'Listen 8081\n' > /etc/apache2/ports.conf
