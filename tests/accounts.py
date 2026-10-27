@@ -150,6 +150,13 @@ control('expire-reset')
 call('auth/password/reset','POST',{'token':reset_token(),'newPassword':'Expired-password-123456'},expected=401)
 control('rates')
 # Retry bounds and lease recovery; no real email or production data.
+control('queue-tamper')
+delivered=len(messages)
+for _ in range(3):
+    control('queue-ready')
+    subprocess.run(['php','bin/process-mail-queue.php','20'],check=True,capture_output=True)
+control('queue-tamper-assert')
+assert len(messages)==delivered  # A forged ciphertext must never reach SMTP.
 smtp_fail=True
 call('auth/password/forgot','POST',{'email':a['email']})
 for _ in range(3):

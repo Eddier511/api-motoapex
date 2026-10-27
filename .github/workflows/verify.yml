@@ -48,6 +48,7 @@ jobs:
           python3 tests/hardening.py
           php tests/read_budget.php
           php tests/accounts_fixture.php
+          php tests/mail_queue_security.php
           python3 tests/accounts.py
           php tests/accounts_assert.php
       - name: Package without credentials

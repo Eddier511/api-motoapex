@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+function publicTaxonomy(string $kind,array $document): array {
+    // Explicit public DTO: new private hydration fields must never become public by default.
+    $fields=['id','slug','name','description','status','order'];
+    $fields=array_merge($fields,$kind==='brands'
+        ? ['primaryColor','secondaryColor','accentLight','tagline','slogan','heroImageUrl','tileImageUrl','logo']
+        : ['brandId']);
+    return array_intersect_key($document,array_flip($fields));
+}
+
 function catalogBatch(string $kind,array $rows,bool $public): array {
     $batch=['media'=>[],'brands'=>[],'categories'=>[],'inventory'=>[],'specs'=>[],'colors'=>[],'images'=>[]];
     if (!$rows) return $batch;
@@ -42,10 +51,11 @@ function handleCatalogRead(string $kind,bool $public,?string $id): never {
     if ($public && $kind==='brands' && $rows) {
         $brandIds=array_column($rows,'id');
         $categoryRows=boundedRows("SELECT * FROM categories WHERE deleted_at IS NULL AND status='active' AND (brand_id IS NULL OR brand_id IN (".inParameters($brandIds).')) ORDER BY id DESC',$brandIds);
-        $categories=array_map(fn($r)=>hydrate('categories',$r,[]),$categoryRows);
+        $categories=array_map(fn($r)=>publicTaxonomy('categories',hydrate('categories',$r,[])),$categoryRows);
     }
     $data=boundedDocuments($rows,function($r) use($kind,$public,$batch,$categories) {
         $out=hydrate($kind,$r,$batch);
+        if ($public && $kind!=='motorcycles') $out=publicTaxonomy($kind,$out);
         if ($public && $kind==='motorcycles') $out=publicMotorcycle($out,$batch['brands'][$r['brand_id']],$batch['categories'][$r['category_id']]);
         if ($public && $kind==='brands') $out['categories']=array_values(array_filter($categories,fn($c)=>$c['brandId']==='' || $c['brandId']===$out['id']));
         return $out;

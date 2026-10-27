@@ -51,6 +51,12 @@ dependencies.json registra versión, fuente y SHA-256 de la copia PHPMailer 7.1.
 
 CI prueba las tres ramas PHP soportadas y el piso de seguridad, mantiene las pruebas de módulos y añade permisos de inventario, paginación sin duplicados, consultas por lotes, login tras fallos hostiles, worker SMTP concurrente, ausencia de bloqueos durante envío, reintentos, recuperación de leases y protección Apache. Los servicios son desechables y no usan credenciales de producción.
 
+También verifica que las marcas/categorías públicas no incluyan fechas internas en listados, detalles por ID/slug ni categorías anidadas; que las fechas sigan disponibles en administración; y que futuros campos privados no atraviesen el DTO público. La paginación incluye una promoción filtrada cuyo `data` queda vacío con cursor hacia la siguiente página visible, además de páginas terminales vacías y exposición CORS de los cursores.
+
+`tests/mail_queue_security.php` comprueba en MySQL aislado que la cola no persista el correo en texto plano, que el identificador use HMAC, que la clave tenga separación de dominio, que cada reencolado renueve el nonce y que encolar no cree tokens de recuperación. Rechaza payloads truncados, malformados, manipulados o cifrados con otra clave. El worker se prueba además con ciphertext manipulado: no envía SMTP, agota sus reintentos y limpia payload y lease. No se publican correos, tokens ni secretos en el resultado.
+
+Un CI exitoso certifica esa revisión en el entorno aislado, no la instalación de Hostinger. Para identificar un paquete instalado, el operador debe consultar `deployment-manifest.json` **fuera de public_html** y contrastar `sourceRevision` con la entrega; no hacer público el manifiesto. Verificar separadamente `schema_migrations` (incluida 006), el ejecutable PHP usado por HTTP y por cron, las directivas de inicio y la configuración/ejecución del worker. No inferir esas condiciones únicamente desde health o una cabecera PHP. No probar recuperación con destinatarios reales sin autorización.
+
 Referencias primarias:
 - https://www.php.net/archive/2026.php
 - https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w

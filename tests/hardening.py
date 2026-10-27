@@ -12,12 +12,27 @@ def call(path,method='GET',data=None,role=None,status=200):
     raw=response.read(); assert response.status==status,(path,response.status,raw[:300])
     assert response.headers.get('X-Request-ID')
     assert not response.headers.get('X-Powered-By')
+    assert response.headers['Access-Control-Allow-Origin']=='https://admin.example.test'
+    assert 'Origin' in ','.join(response.headers.get_all('Vary',[]))
+    assert {'X-Request-ID','Retry-After','X-Next-Cursor','X-Page-Limit'}<=set(x.strip() for x in response.headers['Access-Control-Expose-Headers'].split(','))
     return json.loads(raw),response.headers
 
 brand=call('admin/brands','POST',{'name':'Hardening editable','slug':'hardening-editable','status':'active'},'admin',201)[0]['data']
 cat=call('admin/categories','POST',{'name':'Hardening editable','slug':'hardening-editable','status':'active'},'admin',201)[0]['data']
 payload={'slug':'hardening-editable','model':'Hardening','brandId':brand['id'],'categoryId':cat['id'],'year':2026,'published':False,'inventory':5,'price':1000,'showPrice':False,'allowQuote':False}
 m=call('admin/motorcycles','POST',payload,'admin',201)[0]['data']
+# Public lists and ID/slug detail must exclude private dates recursively.
+def public_dates_absent(value):
+    if isinstance(value,dict):
+        assert not {'createdAt','updatedAt','created_at','updated_at'} & value.keys()
+        for child in value.values(): public_dates_absent(child)
+    elif isinstance(value,list):
+        for child in value: public_dates_absent(child)
+for kind,item in (('brands',brand),('categories',cat)):
+    for suffix in ('','/'+item['id'],'/'+item['slug']):
+        public_dates_absent(call('public/'+kind+suffix)[0]['data'])
+    private=call('admin/'+kind+'/'+item['id'],role='admin')[0]['data']
+    assert private['createdAt'] and private['updatedAt']
 for inventory in (0,6): call('admin/motorcycles/'+m['id'],'PUT',dict(payload,inventory=inventory),'editor',403)
 assert call('admin/motorcycles/'+m['id'],role='admin')[0]['data']['inventory']==5
 copy=dict(payload); del copy['inventory']; copy['model']='Edited safely'
@@ -45,6 +60,18 @@ while True:
     if not cursor: break
 assert len(pages)==6 and len({p['id'] for p in pages})==6
 assert [(p['order'],int(p['id'])) for p in pages]==sorted((p['order'],int(p['id'])) for p in pages)
+# A candidate page can become empty after filtering private motorcycles.
+empty,headers=call('public/promotions?limit=1&cursor=9999:1')
+assert empty['data']==[] and headers['X-Page-Limit']=='1'
+next_cursor=headers['X-Next-Cursor']
+visible,headers=call('public/promotions?limit=1&cursor='+next_cursor)
+assert [x['slug'] for x in visible['data']]==['hardening-visible-promotion']
+assert not headers.get('X-Next-Cursor')
+last=visible['data'][0]
+terminal,headers=call('public/promotions?limit=1&cursor='+str(last['order'])+':'+last['id'])
+assert terminal['data']==[] and not headers.get('X-Next-Cursor') and headers['X-Page-Limit']=='1'
+terminal,headers=call('public/brands?limit=1&cursor=1')
+assert terminal['data']==[] and not headers.get('X-Next-Cursor') and headers['X-Page-Limit']=='1'
 for value in ('0','101','-1','abc','1%20OR%201=1'):
     call('public/motorcycles?limit='+value,status=422)
 call('public/pages?cursor=invalid',status=422)
@@ -57,4 +84,4 @@ for item in [x for x in motos if x['slug'].startswith('hardening-bike-')]:
 subprocess.run(['php','tests/read_budget.php'],check=True)
 subprocess.run(['php','tests/hardening_fixture.php','clean'],check=True)
 assert len(call('public/brands')[0]['data'])<250
-print('Inventory permission, preserved quantities, cursors, public filtering and batch DTOs passed')
+print('Inventory, public taxonomy privacy, cursors including empty pages, CORS and batch DTOs passed')

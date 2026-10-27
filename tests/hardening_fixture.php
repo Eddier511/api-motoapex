@@ -3,7 +3,7 @@ if (PHP_SAPI!=='cli') exit(1);
 require dirname(__DIR__).'/src/bootstrap.php';
 if ((config()['environment'] ?? '')!=='test') throw new RuntimeException('Disposable test database required');
 if (($argv[1] ?? '')==='clean') {
-    foreach (['motorcycles','categories','brands','web_pages'] as $table) query("UPDATE $table SET deleted_at=UTC_TIMESTAMP() WHERE slug LIKE 'hardening-%'");
+    foreach (['promotions','motorcycles','categories','brands','web_pages'] as $table) query("UPDATE $table SET deleted_at=UTC_TIMESTAMP() WHERE slug LIKE 'hardening-%'");
     exit;
 }
 $brand=null;
@@ -22,4 +22,9 @@ for ($i=0;$i<25;$i++) {
     query('INSERT INTO motorcycle_color_images (color_id,media_id) VALUES (?,?)',[$color,$media]);
 }
 for ($i=0;$i<6;$i++) query("INSERT INTO web_pages (title,slug,body,status,sort_order) VALUES (?,?,?,'published',?)",['Hardening','hardening-page-'.$i,'Text',intdiv($i,2)]);
+// First candidate is valid but its only motorcycle is private; next is a public campaign.
+foreach (['hardening-empty-promotion','hardening-visible-promotion'] as $i=>$slug) {
+    query("INSERT INTO promotions (title,slug,image_media_id,starts_at,ends_at,status,sort_order) VALUES ('Hardening',?,?,DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 DAY),DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 DAY),'active',?)",[$slug,$media,10000+$i]);
+    if ($i===0) query("INSERT INTO promotion_motorcycles (promotion_id,motorcycle_id,original_price,promo_price,currency) VALUES (?,(SELECT id FROM motorcycles WHERE slug='hardening-editable'),1000,900,'CRC')",[db()->lastInsertId()]);
+}
 echo "Disposable hardening fixtures prepared\n";

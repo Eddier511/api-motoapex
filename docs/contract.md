@@ -12,7 +12,7 @@ Todas las rutas privadas usan `Authorization: Bearer TOKEN`. Mantén el token en
 
 ## Catálogo
 
-`GET /public/brands`, `/public/categories`, `/public/motorcycles` y sus variantes `/{id-o-slug}`. Solo se publican marcas/categorías activas y motos con `published=true` cuyo brand/category siga activo. Los listados devuelven arrays. Esta versión no tiene búsqueda ni paginación; usar filtros del frontend para catálogos pequeños.
+`GET /public/brands`, `/public/categories`, `/public/motorcycles` y sus variantes `/{id-o-slug}`. Solo se publican marcas/categorías activas y motos con `published=true` cuyo brand/category siga activo. Los listados devuelven arrays y admiten `limit=1..100` y `cursor`; seguir `X-Next-Cursor` hasta que desaparezca, incluso si `data` está vacío. Ver los límites y cabeceras CORS en la sección de endurecimiento. Los filtros de búsqueda del catálogo siguen siendo del frontend.
 
 Admin: `GET /admin/{brands|categories|motorcycles}`, `GET /admin/{kind}/{id-o-slug}`, `POST /admin/{kind}`, `PUT /admin/{kind}/{id-o-slug}` (reemplazo completo), `DELETE /admin/{kind}/{id-o-slug}`.
 
@@ -21,6 +21,8 @@ Admin: `GET /admin/{brands|categories|motorcycles}`, `GET /admin/{kind}/{id-o-sl
 Marca: `name`, `slug` requeridos; `description`, `status` (active/inactive, defecto inactive), `order` entero, `primaryColor`, `secondaryColor`, `accentLight` (#RRGGBB), `logo`, `heroImageUrl`, `tileImageUrl` (HTTPS o vacío), `tagline`, `slogan`. La respuesta pública agrega `categories` de esa marca y categorías generales.
 
 Categoría: `name`, `slug`, `description`, `status`, `order`, `brandId` opcional (vacío = general).
+
+Las respuestas públicas de marcas y categorías usan una lista explícita de campos: `id`, `slug`, `name`, `description`, `status`, `order`; las marcas agregan los colores, imágenes, `logo`, `tagline`, `slogan` y `categories` descritos arriba; las categorías agregan `brandId`. No incluyen `createdAt`, `updatedAt`, autores ni otros metadatos privados, tampoco en categorías anidadas. Esto se aplica a listados y detalles por ID o slug. Las respuestas administrativas conservan `createdAt` y `updatedAt` UTC para el panel.
 
 Moto, ejemplo mínimo para crear borrador:
 
