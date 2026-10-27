@@ -2,6 +2,8 @@
 
 Base: `https://darksalmon-quetzal-730302.hostingersite.com/v1`. Solicitudes con cuerpo: `Content-Type: application/json`. Respuestas: `{ "data": ... }` o `{ "error": { "code": "...", "message": "..." } }`. Los errores son 400/401/403/404/405/409/413/415/422/429/500. El encabezado `X-Request-ID` permite localizar errores sin publicar detalles internos.
 
+Si el runtime no cumple los requisitos, devuelve 503 `SERVICE_UNAVAILABLE` con mensaje genérico. Las respuestas de error incluyen CORS para el origen autorizado si se pudo cargar su configuración; un origen no autorizado no recibe permiso CORS. La validación del runtime también se aplica a health y OPTIONS. El requisito concreto se registra únicamente en logs privados, nunca en el cuerpo público. Ver docs/hosting-503.md.
+
 ## Autenticación
 
 - `POST /auth/login`: `{ "email": "...", "password": "..." }`; devuelve `{token, expiresAt, user}`. `user` usa campos DB: `id`, `name`, `email`, `role`, `status`, `lastAccess`.

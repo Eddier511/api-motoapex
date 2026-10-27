@@ -2,6 +2,8 @@
 
 Este paquete propone cambios de aplicación, pruebas y configuración de referencia. No instala PHP, modifica Hostinger, rota credenciales ni hace merge/despliegue automáticamente. Se basa en la rama completa codex/accounts-security; los PR anteriores siguen siendo dependencias hasta que se integren.
 
+Para 503 SERVICE_UNAVAILABLE del guard PHP, ver docs/hosting-503.md. Los errores de runtime llevan CORS para orígenes autorizados y un diagnóstico técnico solo en el log privado; no se relajan los requisitos de seguridad. Los paquetes nuevos incluyen hashes y bin/check-installation.php para verificar el disco sin confundir CLI con PHP web ni con el estado de OPcache.
+
 ## Instalación en Hostinger
 
 1. Respalda base y archivos. Aplica únicamente las migraciones pendientes según schema_migrations: 002 → 003 → 004 → 005 → **006_security_hardening.sql**. No reimportes schema.sql. 006 crea una cola nueva y limpia bloqueos temporales heredados; no borra usuarios ni contenido. 005, si estaba pendiente, revoca sesiones antiguas.

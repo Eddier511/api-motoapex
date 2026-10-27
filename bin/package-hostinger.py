@@ -1,6 +1,7 @@
 """Build the same credential-free Hostinger layout locally and in CI."""
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -85,13 +86,14 @@ for directory in ('public', 'src', 'vendor'):
             if directory == 'public':
                 path = 'public_html/' + file.relative_to(root / 'public').as_posix()
             files[path] = file.read_bytes()
-for path in ('bin/create-admin.php', 'bin/process-mail-queue.php', 'bin/check-dependencies.py', 'dependencies.json', 'config/php-security.ini', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql', 'database/006_security_hardening.sql',
+for path in ('bin/create-admin.php', 'bin/process-mail-queue.php', 'bin/check-installation.php', 'bin/check-dependencies.py', 'dependencies.json', 'config/php-security.ini', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql', 'database/006_security_hardening.sql',
              'config.example.php', 'README.md', 'docs/contract.md',
-             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/accounts-install.md', 'docs/security-hardening.md'):
+             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/hosting-503.md', 'docs/accounts-install.md', 'docs/security-hardening.md'):
     files[path] = (root / path).read_bytes()
 files['LEEME-INSTALACION.txt'] = instructions.encode('utf-8')
 files['deployment-manifest.json'] = json.dumps({
     'sourceRevision': args.revision or None,
+    'fileSha256': {path: hashlib.sha256(data).hexdigest() for path, data in files.items()},
     'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts', '006_security_hardening'],
     'documentRoot': 'public_html',
     'entrypoint': 'public_html/index.php',

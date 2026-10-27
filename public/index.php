@@ -25,8 +25,6 @@ header('X-Frame-Options: DENY');
 $requestId=bin2hex(random_bytes(12));
 header('X-Request-ID: '.$requestId);
 try {
-    try { requireSecureRuntime(); }
-    catch (RuntimeException) { fail('SERVICE_UNAVAILABLE','Servicio en mantenimiento de seguridad.',503); }
     $origin=$_SERVER['HTTP_ORIGIN'] ?? '';
     if ($origin !== '') {
         if (!in_array($origin,config()['allowed_origins'],true)) fail('ORIGIN_DENIED','Origen no permitido.',403);
@@ -35,6 +33,11 @@ try {
         header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Reauth-Token');
         header('Access-Control-Expose-Headers: X-Request-ID, Retry-After, X-Next-Cursor, X-Page-Limit');
         header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    }
+    try { requireSecureRuntime(); }
+    catch (RuntimeException) {
+        error_log(json_encode(['service'=>'motoapex','event'=>'runtime_unavailable','requestId'=>$requestId,...runtimeDiagnostics()],JSON_THROW_ON_ERROR));
+        fail('SERVICE_UNAVAILABLE','Servicio en mantenimiento de seguridad.',503);
     }
     if (PHP_SAPI !== 'cli-server' && empty($_SERVER['HTTPS']) && ($_SERVER['SERVER_PORT'] ?? '') != 443) fail('HTTPS_REQUIRED','Usa HTTPS.',400);
     if (PHP_SAPI !== 'cli-server') header('Strict-Transport-Security: max-age=31536000');
