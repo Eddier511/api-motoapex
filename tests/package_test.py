@@ -9,6 +9,7 @@ with zipfile.ZipFile(archive_path) as archive:
     assert archive.testzip() is None
     names = set(archive.namelist())
     assert {n for n in names if n.startswith('public_html/')} == {'public_html/index.php','public_html/.htaccess'}
+    assert {'database/006_security_hardening.sql','bin/process-mail-queue.php','config/php-security.ini','dependencies.json','docs/security-hardening.md'} <= names
     assert 'src/bootstrap.php' in names and 'src/repository.php' in names
     assert 'public/index.php' not in names and '.htaccess' not in names
     assert 'config.local.php' not in names and 'tests/setup.php' not in names

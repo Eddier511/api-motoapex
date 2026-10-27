@@ -5,6 +5,10 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3.36', '8.4.27', '8.5.12']
     services:
       mysql:
         image: mysql:8.0
@@ -21,15 +25,19 @@ jobs:
           persist-credentials: false
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
           extensions: pdo_mysql, sodium
           coverage: none
+      - name: Dependency integrity and advisories
+        run: python3 bin/check-dependencies.py --advisories
+      - name: Runtime security floor
+        run: php tests/runtime.php
       - name: PHP syntax
         run: find . -name '*.php' -not -name config.local.php -print0 | xargs -0 -n1 php -l
       - name: Integration tests
         run: |
           php tests/setup.php
-          PHP_CLI_SERVER_WORKERS=4 php -d opcache.enable=0 -d opcache.enable_cli=0 -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
+          PHP_CLI_SERVER_WORKERS=4 php -c config/php-security.ini -d opcache.enable=0 -d opcache.enable_cli=0 -S 127.0.0.1:8080 -t public public/index.php > /tmp/motoapex-test.log 2>&1 &
           for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/v1/health && break || sleep 1; done
           python3 tests/integration.py
           php tests/promotions_fixture.php
@@ -37,6 +45,8 @@ jobs:
           php tests/promotions_assert.php
           python3 tests/content.py
           php tests/content_assert.php
+          python3 tests/hardening.py
+          php tests/read_budget.php
           php tests/accounts_fixture.php
           python3 tests/accounts.py
           php tests/accounts_assert.php
@@ -63,5 +73,5 @@ jobs:
         run: docker stop motoapex-apache || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: api-motoapex-hostinger
+          name: api-motoapex-hostinger-${{ matrix.php }}
           path: api-motoapex-hostinger.zip
