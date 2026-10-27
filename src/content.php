@@ -81,7 +81,7 @@ function contentRow(string $kind,?string $id,bool $lock=false): array {
     if (!$row) fail('NOT_FOUND','Contenido no encontrado.',404);
     return $row;
 }
-function contentDocument(string $kind,array $row,bool $public): ?array {
+function contentDocument(string $kind,array $row,bool $public,?array $batch=null): ?array {
     $out=['id'=>(string)$row['id']];
     if ($kind==='pages') {
         if ($public && $row['status']!=='published') return null;
@@ -92,11 +92,11 @@ function contentDocument(string $kind,array $row,bool $public): ?array {
         }
         $out+=['title'=>strip_tags($row['title']),'slug'=>$row['slug'],'content'=>$content,'contentFormat'=>$row['content_format'],'order'=>(int)$row['sort_order'],'status'=>$row['status'],'seo'=>['title'=>strip_tags($row['meta_title'] ?? ''),'description'=>strip_tags($row['meta_description'] ?? '')]];
     } elseif ($kind==='banners') {
-        if ($public && !query("SELECT id FROM web_banners WHERE id=? AND status='active' AND deleted_at IS NULL AND (starts_at IS NULL OR starts_at<=UTC_TIMESTAMP()) AND (ends_at IS NULL OR ends_at>=UTC_TIMESTAMP())",[$row['id']])->fetchColumn()) return null;
-        $brand=brandSummary($row['brand_id'],$public);
+        if ($public && $batch===null && !query("SELECT id FROM web_banners WHERE id=? AND status='active' AND deleted_at IS NULL AND (starts_at IS NULL OR starts_at<=UTC_TIMESTAMP()) AND (ends_at IS NULL OR ends_at>=UTC_TIMESTAMP())",[$row['id']])->fetchColumn()) return null;
+        $brand=$batch===null ? brandSummary($row['brand_id'],$public) : ($batch['brands'][$row['brand_id']] ?? null);
         if ($public && $row['brand_id']!==null && !$brand) return null;
-        if ($public && $row['page_id']!==null && !query("SELECT id FROM web_pages WHERE id=? AND status='published' AND deleted_at IS NULL",[$row['page_id']])->fetchColumn()) return null;
-        $out+=['title'=>strip_tags($row['title']),'subtitle'=>strip_tags($row['subtitle'] ?? ''),'imageUrl'=>mediaUrl($row['desktop_media_id']),'mobileImageUrl'=>mediaUrl($row['mobile_media_id']),'alt'=>strip_tags($row['alt_text']),'brandId'=>$row['brand_id']===null ? null : (string)$row['brand_id'],'brandSlug'=>$brand['slug'] ?? null,'brand'=>$brand,'pageId'=>$row['page_id']===null ? null : (string)$row['page_id'],'accentColor'=>$row['accent_color'],'ctaPrimary'=>$row['button_label']===null ? null : ['label'=>strip_tags($row['button_label']),'href'=>$row['link_url']],'ctaSecondary'=>$row['secondary_button_label']===null ? null : ['label'=>strip_tags($row['secondary_button_label']),'href'=>$row['secondary_link_url']],'placement'=>$row['placement'],'order'=>(int)$row['sort_order'],'status'=>$row['status'],'startsAt'=>iso($row['starts_at']),'endsAt'=>iso($row['ends_at'])];
+        if ($public && $batch===null && $row['page_id']!==null && !query("SELECT id FROM web_pages WHERE id=? AND status='published' AND deleted_at IS NULL",[$row['page_id']])->fetchColumn()) return null;
+        $out+=['title'=>strip_tags($row['title']),'subtitle'=>strip_tags($row['subtitle'] ?? ''),'imageUrl'=>($batch===null ? mediaUrl($row['desktop_media_id']) : ($batch['media'][$row['desktop_media_id']] ?? '')),'mobileImageUrl'=>($batch===null ? mediaUrl($row['mobile_media_id']) : ($batch['media'][$row['mobile_media_id']] ?? '')),'alt'=>strip_tags($row['alt_text']),'brandId'=>$row['brand_id']===null ? null : (string)$row['brand_id'],'brandSlug'=>$brand['slug'] ?? null,'brand'=>$brand,'pageId'=>$row['page_id']===null ? null : (string)$row['page_id'],'accentColor'=>$row['accent_color'],'ctaPrimary'=>$row['button_label']===null ? null : ['label'=>strip_tags($row['button_label']),'href'=>$row['link_url']],'ctaSecondary'=>$row['secondary_button_label']===null ? null : ['label'=>strip_tags($row['secondary_button_label']),'href'=>$row['secondary_link_url']],'placement'=>$row['placement'],'order'=>(int)$row['sort_order'],'status'=>$row['status'],'startsAt'=>iso($row['starts_at']),'endsAt'=>iso($row['ends_at'])];
         if ($public) { try { validateContent('banners',array_diff_key($out,array_flip(['id','brandSlug','brand']))); } catch (InvalidArgumentException) { return null; } }
     } elseif ($kind==='social-links') {
         if ($public && $row['status']!=='active') return null;
@@ -123,9 +123,16 @@ function handleContent(string $scope,string $kind,string $method,?string $id,?ar
     if ($method==='GET') {
         limit('content-read',300);
         if ($kind==='contact' || $id!==null) { $doc=contentDocument($kind,contentRow($kind,$id),$public); if (!$doc) fail('NOT_FOUND','Contenido no encontrado.',404); respond($doc); }
-        $rows=query("SELECT * FROM $table WHERE deleted_at IS NULL ORDER BY sort_order,id")->fetchAll();
-        if ($kind==='banners' && isset($_GET['placement'])) { $placement=textField($_GET,'placement',100,true); $rows=array_values(array_filter($rows,fn($r)=>$r['placement']===$placement)); }
-        respond(array_values(array_filter(array_map(fn($r)=>contentDocument($kind,$r,$public),$rows))));
+        $where='t.deleted_at IS NULL'; $params=[];
+        if ($public) $where.=match($kind){
+            'pages'=>" AND t.status='published'",
+            'social-links'=>" AND t.status='active'",
+            'banners'=>" AND t.status='active' AND (t.starts_at IS NULL OR t.starts_at<=UTC_TIMESTAMP()) AND (t.ends_at IS NULL OR t.ends_at>=UTC_TIMESTAMP()) AND (t.brand_id IS NULL OR EXISTS (SELECT 1 FROM brands b WHERE b.id=t.brand_id AND b.status='active' AND b.deleted_at IS NULL)) AND (t.page_id IS NULL OR EXISTS (SELECT 1 FROM web_pages p WHERE p.id=t.page_id AND p.status='published' AND p.deleted_at IS NULL))"
+        };
+        if ($kind==='banners' && isset($_GET['placement'])) { $where.=' AND t.placement=?'; $params[]=textField($_GET,'placement',100,true); }
+        $rows=listRows($table.' t',$where,$params,'t');
+        $batch=$kind==='banners' ? contentBannerBatch($rows,$public) : null;
+        respond(boundedDocuments($rows,fn($r)=>contentDocument($kind,$r,$public,$batch)));
     }
     limit('content-write',80);
     if (($method==='POST' && $id===null && $kind!=='contact') || ($method==='PUT' && ($id!==null || $kind==='contact'))) {
@@ -151,4 +158,15 @@ function handleContent(string $scope,string $kind,string $method,?string $id,?ar
         respond(['id'=>(string)$old['id'],'deleted'=>true]);
     }
     fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
+}
+
+function contentBannerBatch(array $rows,bool $public): array {
+    $batch=['brands'=>[],'media'=>[]]; if (!$rows) return $batch;
+    $ids=array_values(array_unique(array_filter(array_column($rows,'brand_id'),fn($id)=>$id!==null)));
+    if ($ids) {
+        $brands=query('SELECT id,name,slug,primary_color FROM brands WHERE id IN ('.inParameters($ids).')'.($public ? " AND status='active' AND deleted_at IS NULL" : ''),$ids)->fetchAll();
+        foreach ($brands as $b) $batch['brands'][$b['id']]=['id'=>(string)$b['id'],'name'=>$b['name'],'slug'=>$b['slug'],'primaryColor'=>$b['primary_color']];
+    }
+    $batch['media']=mediaMap([...array_column($rows,'desktop_media_id'),...array_column($rows,'mobile_media_id')]);
+    return $batch;
 }

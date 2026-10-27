@@ -16,6 +16,8 @@ return [
     // Generate on the server: php -r 'echo base64_encode(random_bytes(32));'
     // Back up securely; losing or replacing this key makes existing MFA secrets unreadable.
     'mfa_encryption_key' => '',
+    // Optional separate 32-byte Base64 key. Empty uses a domain-separated MFA key.
+    'recovery_queue_key' => '',
     'password_reset_url' => 'https://admin.motoapexcr.com/reset-password',
     // SMTP is configured only here, outside public_html; missing values disable recovery (503).
     'smtp' => ['host'=>'','port'=>587,'encryption'=>'tls','username'=>'','password'=>'','from'=>''],

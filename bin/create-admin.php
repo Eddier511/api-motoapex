@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+require dirname(__DIR__).'/src/runtime.php';
+requireSecureRuntime();
 require dirname(__DIR__).'/src/bootstrap.php';
 $email=strtolower(trim($argv[1] ?? ''));
 $name=trim($argv[2] ?? 'Administrador');

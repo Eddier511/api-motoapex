@@ -2,6 +2,8 @@
 
 Base: `https://darksalmon-quetzal-730302.hostingersite.com/v1`. Solicitudes con cuerpo: `Content-Type: application/json`. Respuestas: `{ "data": ... }` o `{ "error": { "code": "...", "message": "..." } }`. Los errores son 400/401/403/404/405/409/413/415/422/429/500. El encabezado `X-Request-ID` permite localizar errores sin publicar detalles internos.
 
+Si el runtime no cumple los requisitos, devuelve 503 `SERVICE_UNAVAILABLE` con mensaje genérico. Las respuestas de error incluyen CORS para el origen autorizado si se pudo cargar su configuración; un origen no autorizado no recibe permiso CORS. La validación del runtime también se aplica a health y OPTIONS. El requisito concreto se registra únicamente en logs privados, nunca en el cuerpo público. Ver docs/hosting-503.md.
+
 ## Autenticación
 
 - `POST /auth/login`: `{ "email": "...", "password": "..." }`; devuelve `{token, expiresAt, user}`. `user` usa campos DB: `id`, `name`, `email`, `role`, `status`, `lastAccess`.
@@ -12,7 +14,7 @@ Todas las rutas privadas usan `Authorization: Bearer TOKEN`. Mantén el token en
 
 ## Catálogo
 
-`GET /public/brands`, `/public/categories`, `/public/motorcycles` y sus variantes `/{id-o-slug}`. Solo se publican marcas/categorías activas y motos con `published=true` cuyo brand/category siga activo. Los listados devuelven arrays. Esta versión no tiene búsqueda ni paginación; usar filtros del frontend para catálogos pequeños.
+`GET /public/brands`, `/public/categories`, `/public/motorcycles` y sus variantes `/{id-o-slug}`. Solo se publican marcas/categorías activas y motos con `published=true` cuyo brand/category siga activo. Los listados devuelven arrays y admiten `limit=1..100` y `cursor`; seguir `X-Next-Cursor` hasta que desaparezca, incluso si `data` está vacío. Ver los límites y cabeceras CORS en la sección de endurecimiento. Los filtros de búsqueda del catálogo siguen siendo del frontend.
 
 Admin: `GET /admin/{brands|categories|motorcycles}`, `GET /admin/{kind}/{id-o-slug}`, `POST /admin/{kind}`, `PUT /admin/{kind}/{id-o-slug}` (reemplazo completo), `DELETE /admin/{kind}/{id-o-slug}`.
 
@@ -21,6 +23,8 @@ Admin: `GET /admin/{brands|categories|motorcycles}`, `GET /admin/{kind}/{id-o-sl
 Marca: `name`, `slug` requeridos; `description`, `status` (active/inactive, defecto inactive), `order` entero, `primaryColor`, `secondaryColor`, `accentLight` (#RRGGBB), `logo`, `heroImageUrl`, `tileImageUrl` (HTTPS o vacío), `tagline`, `slogan`. La respuesta pública agrega `categories` de esa marca y categorías generales.
 
 Categoría: `name`, `slug`, `description`, `status`, `order`, `brandId` opcional (vacío = general).
+
+Las respuestas públicas de marcas y categorías usan una lista explícita de campos: `id`, `slug`, `name`, `description`, `status`, `order`; las marcas agregan los colores, imágenes, `logo`, `tagline`, `slogan` y `categories` descritos arriba; las categorías agregan `brandId`. No incluyen `createdAt`, `updatedAt`, autores ni otros metadatos privados, tampoco en categorías anidadas. Esto se aplica a listados y detalles por ID o slug. Las respuestas administrativas conservan `createdAt` y `updatedAt` UTC para el panel.
 
 Moto, ejemplo mínimo para crear borrador:
 
@@ -214,7 +218,7 @@ POST /auth/reauth `{password,action}` donde action es users.manage, settings.man
 
 ### Recuperación SMTP
 
-POST /auth/password/forgot `{email}` devuelve siempre el mismo cuerpo para correos activos/inexistentes/inactivos: `{data:{message:"Si existe una cuenta activa, recibirás un enlace de recuperación."}}`. No devuelve el token. Un correo activo recibe un enlace HTTPS con fragmento `#token=...`, válido 30 minutos, con token de 256 bits almacenado solo como SHA-256. Una solicitud nueva invalida enlaces anteriores. POST /auth/password/reset `{token,newPassword}` verifica vencimiento/un solo uso/estado activo, cambia contraseña y revoca sesiones/desafíos/enlaces. Devuelve `{data:{changed:true,loginRequired:true}}`; un enlace inválido, usado o vencido responde 401 INVALID_RESET. No crea sesión ni elimina MFA.
+POST /auth/password/forgot `{email}` devuelve siempre el mismo cuerpo para correos activos/inexistentes/inactivos: `{data:{message:"Si existe una cuenta activa, recibirás un enlace de recuperación."}}`. No devuelve el token. Un correo activo recibe un enlace HTTPS con fragmento `#token=...`, válido 30 minutos, con token de 256 bits almacenado solo como SHA-256. Una entrega exitosa nueva del worker invalida enlaces anteriores. POST /auth/password/reset `{token,newPassword}` verifica vencimiento/un solo uso/estado activo, cambia contraseña y revoca sesiones/desafíos/enlaces. Devuelve `{data:{changed:true,loginRequired:true}}`; un enlace inválido, usado o vencido responde 401 INVALID_RESET. No crea sesión ni elimina MFA.
 
 Sin SMTP correctamente configurado todas las solicitudes reciben 503 SMTP_NOT_CONFIGURED. No se simula entrega. SMTP y URL de recuperación se configuran únicamente en config.local.php del servidor; instalación, TLS, remitente y pruebas reales pendientes se detallan en docs/accounts-install.md. El mensaje SMTP nunca se registra en logs. El frontend debe leer/eliminar el fragmento, conservar token en memoria y no enviarlo a analytics.
 
@@ -227,4 +231,17 @@ Sin SMTP correctamente configurado todas las solicitudes reciben 503 SMTP_NOT_CO
 
 No se emite sesión completa antes de MFA. Login de cuentas sin MFA permanece compatible. Secretos MFA anteriores que no estén cifrados en este formato deben recuperarse mediante mantenimiento privado autorizado; no hay fallback a texto plano ni bypass. Falta de Sodium/clave produce 503 MFA_NOT_CONFIGURED en las operaciones que requieren cifrado.
 
-Límites por IP/15 minutos: login 10, MFA login/confirm 10, recuperación 5, reset/cambio obligatorio/cambio propio 10, reauth 10, alta/desactivación/rotación MFA 5, usuarios lectura 150/escritura 40, ajustes lectura 150/escritura 30. Además buckets independientes de IP: login por correo 8, MFA login por cuenta 8, recuperación por correo 3 y reauth por cuenta 8. Bloqueo temporal del usuario después de fallos de contraseña. 429 incluye Retry-After:900 expuesto por CORS. Auditoría registra acciones y actor/request ID, nunca contraseñas, tokens, secretos o cuerpos de correo. Instalación final y SMTP real en Hostinger necesitan validación posterior autorizada.
+Límites por IP/15 minutos: login 10, MFA login/confirm 10, recuperación 5, reset/cambio obligatorio/cambio propio 10, reauth 10, alta/desactivación/rotación MFA 5, usuarios lectura 150/escritura 40, ajustes lectura 150/escritura 30. Además buckets independientes de IP: credenciales fallidas de login por correo 8 (no bloquea credenciales válidas), MFA login por cuenta 8, recuperación por correo 3 y reauth por cuenta 8. Cuota por IP y contadores de fallos; no se impone un bloqueo global de la cuenta antes de verificar credenciales válidas. 429 incluye Retry-After:900 expuesto por CORS. Auditoría registra acciones y actor/request ID, nunca contraseñas, tokens, secretos o cuerpos de correo. Instalación final y SMTP real en Hostinger necesitan validación posterior autorizada.
+
+
+## Correcciones de seguridad (migración 006)
+
+Ver docs/security-hardening.md para instalación y límites completos. El contrato habitual y los flujos MFA/challenges se conservan.
+
+- POST/PUT de motos: modificar inventory requiere inventory.manage. Omitir inventory en una edición conserva existencias; no se interpreta como cero. El resto del PUT sigue siendo reemplazo de campos según su contrato.
+- POST /auth/password/forgot: mismo cuerpo genérico, ahora encola el correo cifrado sin consultar usuarios ni contactar SMTP durante HTTP. Un cron privado procesa la cola, consulta la cuenta y genera el enlace. Sin worker no hay entrega. La expiración de 30 minutos del token empieza al generarlo el worker, y una entrega exitosa invalida enlaces previos. No hay nueva ruta pública de estado de cuenta/cola.
+- SMTP no configurado: 503 SMTP_NOT_CONFIGURED. Clave de cola ausente: 503 RECOVERY_NOT_CONFIGURED. Cola llena: 503 RECOVERY_BUSY. No se devuelve el token.
+- Lecturas de catálogo, páginas, banners, redes y promociones: aceptan limit=1..100 y cursor. Devuelven el mismo array en data, con X-Next-Cursor cuando quedan filas y X-Page-Limit al paginar, ambos expuestos por CORS. Sin parámetros, hasta 250 filas candidatas; una lista mayor responde 422 PAGINATION_REQUIRED sin datos truncados. El cursor puede existir aunque data esté vacío después de filtrar relaciones no públicas. Seguirlo hasta que desaparezca.
+- Catálogo: cursor de ID, orden descendente. Contenido/promociones: cursor orden:id, orden ascendente por order/id. Usar URLSearchParams para reenviarlo. Listados de más de 8 MiB o relaciones sobre el presupuesto devuelven 422 PAGE_TOO_LARGE; reducir limit.
+- Catálogo 300 lecturas/IP/15 minutos y health 60. 429 mantiene Retry-After:900 expuesto por CORS.
+- El router conserva {data:...}/{error:...} y X-Request-ID. Los bloqueos previos del gateway para multipart/cuerpos grandes pueden ser respuestas 403/413 HTML. No deben tratarse como datos ni sustituirse por mocks.

@@ -1,10 +1,13 @@
 """Build the same credential-free Hostinger layout locally and in CI."""
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import os
 import re
 import stat
+import subprocess
+import sys
 import zipfile
 
 root = Path(__file__).resolve().parents[1]
@@ -37,7 +40,7 @@ instructions = '''INSTALACION API MOTOAPEX
 
 3. Como el esquema inicial ya esta importado, verifica schema_migrations.
    Aplica 002_api_support.sql SOLO si no esta aplicada y despues
-   003_promotions.sql, 004_web_content.sql y 005_accounts.sql, una sola vez, despues de un respaldo.
+   003_promotions.sql, 004_web_content.sql, 005_accounts.sql y 006_security_hardening.sql, una sola vez, despues de un respaldo.
    No vuelvas a importar schema.sql. No borres tablas para instalar la API.
 
 4. El document root debe ser public_html. Reemplaza su .htaccess por el
@@ -49,7 +52,7 @@ instructions = '''INSTALACION API MOTOAPEX
    Si persiste 403 HTML, revisa los logs de acceso/errores, propietario,
    document root y reglas de hPanel/CDN. No desactives la seguridad global.
 
-5. Selecciona PHP 8.3 o superior con PDO MySQL y Sodium, y habilita HTTPS.
+5. Selecciona PHP 8.3.36+, 8.4.27+ o 8.5.12+ con PDO MySQL y Sodium, y habilita HTTPS.
    Desactiva mostrar errores PHP al visitante.
 
 6. Crea el usuario administrador mediante bin/create-admin.php, desde terminal:
@@ -69,9 +72,12 @@ instructions = '''INSTALACION API MOTOAPEX
 
 Consulta docs/contract.md para rutas y campos. El paquete es la primera version:
 Configura SMTP, URL de recuperacion y clave MFA solo en config.local.php.
-005 revoca sesiones anteriores. No incluye credenciales ni secretos. Las imagenes se guardan como enlaces HTTPS.
+005 revoca sesiones anteriores. 006 agrega la cola privada de recuperacion.
+Configura una tarea cron cada minuto: php RUTA_PRIVADA/bin/process-mail-queue.php 20
+Sin esta tarea no se enviaran enlaces de recuperacion. Ver docs/security-hardening.md. No incluye credenciales ni secretos. Las imagenes se guardan como enlaces HTTPS.
 '''
 
+subprocess.run([sys.executable,str(root/'bin/check-dependencies.py')],check=True)
 files = {}
 for directory in ('public', 'src', 'vendor'):
     for file in (root / directory).rglob('*'):
@@ -80,14 +86,15 @@ for directory in ('public', 'src', 'vendor'):
             if directory == 'public':
                 path = 'public_html/' + file.relative_to(root / 'public').as_posix()
             files[path] = file.read_bytes()
-for path in ('bin/create-admin.php', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql',
+for path in ('bin/create-admin.php', 'bin/process-mail-queue.php', 'bin/check-installation.php', 'bin/check-dependencies.py', 'dependencies.json', 'config/php-security.ini', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql', 'database/006_security_hardening.sql',
              'config.example.php', 'README.md', 'docs/contract.md',
-             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/accounts-install.md'):
+             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/hosting-503.md', 'docs/accounts-install.md', 'docs/security-hardening.md'):
     files[path] = (root / path).read_bytes()
 files['LEEME-INSTALACION.txt'] = instructions.encode('utf-8')
 files['deployment-manifest.json'] = json.dumps({
     'sourceRevision': args.revision or None,
-    'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts'],
+    'fileSha256': {path: hashlib.sha256(data).hexdigest() for path, data in files.items()},
+    'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts', '006_security_hardening'],
     'documentRoot': 'public_html',
     'entrypoint': 'public_html/index.php',
     'privateConfig': 'config.local.php (create on server, not included)',

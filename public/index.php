@@ -2,6 +2,8 @@
 declare(strict_types=1);
 ini_set('display_errors','0');
 ini_set('log_errors','1');
+header_remove('X-Powered-By');
+require dirname(__DIR__).'/src/runtime.php';
 require dirname(__DIR__).'/src/bootstrap.php';
 require dirname(__DIR__).'/src/validation.php';
 require dirname(__DIR__).'/src/shared_validation.php';
@@ -10,6 +12,9 @@ require dirname(__DIR__).'/src/promotions.php';
 require dirname(__DIR__).'/src/content.php';
 require dirname(__DIR__).'/src/accounts.php';
 require dirname(__DIR__).'/src/users_settings.php';
+require dirname(__DIR__).'/src/read_limits.php';
+require dirname(__DIR__).'/src/mail_queue.php';
+require dirname(__DIR__).'/src/catalog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -26,8 +31,13 @@ try {
         header('Access-Control-Allow-Origin: '.$origin);
         header('Vary: Origin');
         header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Reauth-Token');
-        header('Access-Control-Expose-Headers: X-Request-ID, Retry-After');
+        header('Access-Control-Expose-Headers: X-Request-ID, Retry-After, X-Next-Cursor, X-Page-Limit');
         header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    }
+    try { requireSecureRuntime(); }
+    catch (RuntimeException) {
+        error_log(json_encode(['service'=>'motoapex','event'=>'runtime_unavailable','requestId'=>$requestId,...runtimeDiagnostics()],JSON_THROW_ON_ERROR));
+        fail('SERVICE_UNAVAILABLE','Servicio en mantenimiento de seguridad.',503);
     }
     if (PHP_SAPI !== 'cli-server' && empty($_SERVER['HTTPS']) && ($_SERVER['SERVER_PORT'] ?? '') != 443) fail('HTTPS_REQUIRED','Usa HTTPS.',400);
     if (PHP_SAPI !== 'cli-server') header('Strict-Transport-Security: max-age=31536000');
@@ -37,7 +47,7 @@ try {
     $path=explode('/',trim(parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH),'/'));
     if (($path[0] ?? '')!=='v1') fail('NOT_FOUND','Ruta no encontrada.',404);
     array_shift($path);
-    if ($path===['health'] && $method==='GET') { query('SELECT 1'); respond(['status'=>'ok']); }
+    if ($path===['health'] && $method==='GET') { limit('health-read',60); query('SELECT 1'); respond(['status'=>'ok']); }
     handleAuth($path,$method,$requestId);
     if ($path===['public','leads'] && $method==='POST') {
         limit('lead',5); $a=body();
@@ -97,23 +107,12 @@ try {
     if (!in_array($kind,['brands','categories','motorcycles'],true)) fail('NOT_FOUND','Ruta no encontrada.',404);
     if ($scope==='public' && $method!=='GET') fail('METHOD_NOT_ALLOWED','Método no permitido.',405);
     if ($scope==='admin') { authorize($user,['admin','editor','marketing']); permit($user,'motorcycles.read'); }
-    if ($method==='GET') {
-        $rows=$id ? [resource($kind,$id)] : resources($kind);
-        if ($scope==='public') {
-            $rows=array_values(array_filter($rows,fn($r)=>$kind==='motorcycles' ? visible($r) : $r['status']==='active'));
-            if ($kind==='motorcycles') $rows=array_map('publicMotorcycle',$rows);
-            if ($kind==='brands') $rows=array_map(function($b) {
-                $b['categories']=array_values(array_filter(resources('categories'),fn($c)=>$c['status']==='active' && ($c['brandId']==='' || $c['brandId']===$b['id'])));
-                return $b;
-            },$rows);
-        }
-        if ($id && !$rows) fail('NOT_FOUND','Recurso no encontrado.',404);
-        respond($id ? $rows[0] : $rows);
-    }
+    if ($method==='GET') handleCatalogRead($kind,$scope==='public',$id);
     authorize($user,['admin','editor']);
     if (($method==='POST' && !$id) || ($method==='PUT' && $id)) {
         db()->beginTransaction();
-        $old=$id ? resource($kind,$id) : null; $out=validateResource($kind,body());
+        $old=$id ? resource($kind,$id) : null; $input=body(); $out=validateResource($kind,$input);
+        if ($kind==='motorcycles' && !array_key_exists('inventory',$input)) $out['inventory']=$old['inventory'] ?? 0;
         permit($user,['motorcycles'=>'motorcycles.write','brands'=>'brands.manage','categories'=>'categories.manage'][$kind]);
         if ($kind==='motorcycles' && $out['published']!==($old['published'] ?? false)) permit($user,'motorcycles.publish');
         if ($kind==='motorcycles') {
@@ -142,7 +141,7 @@ try {
 } catch (InvalidArgumentException $e) { fail('VALIDATION_ERROR',$e->getMessage(),422); }
 catch (PDOException $e) {
     if ($e->getCode()==='23000') fail('CONFLICT','Ya existe un recurso con ese identificador.',409);
-    error_log('MotoApex request='.$requestId.' database_error'); fail('INTERNAL_ERROR','Error interno. Referencia: '.$requestId,500);
+    error_log('MotoApex request='.$requestId.' database_error sqlstate='.$e->getCode().' driver='.(int)($e->errorInfo[1] ?? 0)); fail('INTERNAL_ERROR','Error interno. Referencia: '.$requestId,500);
 } catch (Throwable $e) {
     error_log('MotoApex request='.$requestId.' exception='.get_class($e)); fail('INTERNAL_ERROR','Error interno. Referencia: '.$requestId,500);
 }

@@ -119,9 +119,9 @@ function recoveryCodes(string $id): array {
 }
 function smtpConfig(): array {
     $s=config()['smtp'] ?? []; $url=config()['password_reset_url'] ?? '';
-    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null || preg_match('/[\x00-\x20\x7f\\\\]/',rawurldecode($url))) fail('SMTP_NOT_CONFIGURED','Recuperación pendiente: configurar SMTP y URL de recuperación en el servidor.',503);
+    if (empty($s['host']) || empty($s['from']) || !filter_var($s['from'],FILTER_VALIDATE_EMAIL) || !filter_var($url,FILTER_VALIDATE_URL) || parse_url($url,PHP_URL_SCHEME)!=='https' || parse_url($url,PHP_URL_USER)!==null || parse_url($url,PHP_URL_FRAGMENT)!==null || preg_match('/[\x00-\x20\x7f\\\\]/',rawurldecode($url))) configurationUnavailable('SMTP_NOT_CONFIGURED','Recuperación pendiente: configurar SMTP y URL de recuperación en el servidor.',503);
     $localTest=(config()['environment'] ?? '')==='test' && $s['host']==='127.0.0.1';
-    if (!$localTest && (!in_array($s['encryption'] ?? '',['tls','ssl'],true) || empty($s['username']) || empty($s['password']))) fail('SMTP_NOT_CONFIGURED','SMTP requiere TLS y credenciales del servidor.',503);
+    if (!$localTest && (!in_array($s['encryption'] ?? '',['tls','ssl'],true) || empty($s['username']) || empty($s['password']))) configurationUnavailable('SMTP_NOT_CONFIGURED','SMTP requiere TLS y credenciales del servidor.',503);
     return $s;
 }
 function sendResetMail(string $email,string $token): void {
@@ -129,6 +129,7 @@ function sendResetMail(string $email,string $token): void {
     foreach (['Exception','SMTP','PHPMailer'] as $file) require_once dirname(__DIR__).'/vendor/phpmailer/src/'.$file.'.php';
     $mail=new PHPMailer\PHPMailer\PHPMailer(true); $mail->isSMTP(); $mail->Host=$s['host']; $mail->Port=(int)($s['port'] ?? 587); $mail->SMTPSecure=$s['encryption'] ?? 'tls'; $mail->SMTPAutoTLS=$mail->SMTPSecure!==''; $mail->SMTPAuth=!empty($s['username']); $mail->Username=$s['username'] ?? ''; $mail->Password=$s['password'] ?? ''; $mail->Timeout=10; $mail->SMTPDebug=0; $mail->CharSet='UTF-8';
     $mail->setFrom($s['from'],'MotoApex'); $mail->addAddress($email); $mail->Subject='Restablecer contraseña MotoApex'; $mail->isHTML(false);
+    $mail->getSMTPInstance()->Timelimit=10;
     // Fragment avoids sending the token to frontend HTTP access logs or Referer.
     $mail->Body="Abre este enlace para restablecer tu contraseña. Vence en 30 minutos y solo puede usarse una vez.\n".config()['password_reset_url'].'#token='.$token."\nSi no solicitaste el cambio, ignora este correo.";
     $mail->send();
@@ -140,16 +141,20 @@ function handleAuth(array $path,string $method,string $requestId): void {
     if ($route==='login' && $method==='POST') {
         limit('login',10); $a=body(); contentKeys($a,['email','password']); $email=strtolower(textField($a,'email',191,true));
         $password=$a['password']; if (!is_string($password) || strlen($password)<1 || strlen($password)>72 || str_contains($password,"\0")) throw new InvalidArgumentException('Contraseña inválida');
-        accountLimit('login',hash('sha256',$email),8);
-        db()->beginTransaction();
-        $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE email=? AND deleted_at IS NULL FOR UPDATE',[$email])->fetch();
+        // Do not lock a victim out before checking their credentials. Per-IP
+        // quotas still bound expensive password verification for every caller.
+        $u=query('SELECT u.*,r.code AS role FROM users u JOIN roles r ON r.id=u.role_id WHERE email=? AND deleted_at IS NULL',[$email])->fetch();
         $valid=password_verify($password,$u['password_hash'] ?? '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi');
-        $blocked=$u && $u['locked_until'] && strtotime($u['locked_until'].' UTC')>time();
-        query('INSERT INTO login_attempts (email,user_id,ip_address,succeeded) VALUES (?,?,?,?)',[$email,$u['id'] ?? null,$_SERVER['REMOTE_ADDR'] ?? null,(int)($u && $valid && !$blocked && $u['status']==='active')]);
-        if (!$u || !$valid || $blocked || $u['status']!=='active') {
-            if ($u && !$blocked) query('UPDATE users SET failed_login_attempts=failed_login_attempts+1,locked_until=CASE WHEN failed_login_attempts>=8 THEN DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE) ELSE NULL END WHERE id=?',[$u['id']]);
-            audit('login_failed',$requestId); db()->commit(); fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401);
+        if (!$u || !$valid || $u['status']!=='active') {
+            if ($u) query('UPDATE users SET failed_login_attempts=LEAST(failed_login_attempts+1,65535),locked_until=NULL WHERE id=?',[$u['id']]);
+            query('INSERT INTO login_attempts (email,user_id,ip_address,succeeded) VALUES (?,?,?,0)',[$email,$u['id'] ?? null,$_SERVER['REMOTE_ADDR'] ?? null]);
+            audit('login_failed',$requestId);
+            accountLimit('login-failed',hash('sha256',$email),8);
+            fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401);
         }
+        db()->beginTransaction(); $verifiedHash=$u['password_hash']; $u=accountRow((string)$u['id'],true);
+        if ($u['status']!=='active' || !hash_equals($verifiedHash,$u['password_hash'])) { db()->rollBack(); fail('INVALID_CREDENTIALS','Credenciales incorrectas.',401); }
+        query('INSERT INTO login_attempts (email,user_id,ip_address,succeeded) VALUES (?,?,?,1)',[$email,$u['id'],$_SERVER['REMOTE_ADDR'] ?? null]);
         query('UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=?',[$u['id']]);
         if (query('SELECT id FROM user_mfa WHERE user_id=? AND confirmed_at IS NOT NULL',[$u['id']])->fetchColumn()) $result=issueChallenge($u,'mfa_login');
         elseif ($u['must_change_password']) $result=issueChallenge($u,'password_change');
@@ -175,14 +180,7 @@ function handleAuth(array $path,string $method,string $requestId): void {
     if ($route==='password/forgot' && $method==='POST') {
         limit('password-forgot',5); $a=body(); contentKeys($a,['email']); $email=strtolower(textField($a,'email',191,true)); if (!filter_var($email,FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Correo inválido');
         accountLimit('recovery',hash('sha256',$email),3); smtpConfig();
-        $u=query("SELECT id,email FROM users WHERE email=? AND status='active' AND deleted_at IS NULL",[$email])->fetch();
-        if ($u) {
-            $token=bin2hex(random_bytes(32)); db()->beginTransaction();
-            accountRow((string)$u['id'],true); query('UPDATE password_reset_tokens SET used_at=UTC_TIMESTAMP() WHERE user_id=? AND used_at IS NULL',[$u['id']]);
-            query('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 30 MINUTE))',[$u['id'],hash('sha256',$token)]);
-            try { sendResetMail($u['email'],$token); db()->commit(); }
-            catch (Throwable) { db()->rollBack(); /* Same public response for missing addresses and delivery failures. */ error_log('MotoApex request='.$requestId.' smtp_delivery_failed'); }
-        }
+        queueEmail($email);
         audit('password_recovery_requested',$requestId); respond(['message'=>'Si existe una cuenta activa, recibirás un enlace de recuperación.']);
     }
     if ($route==='password/reset' && $method==='POST') {

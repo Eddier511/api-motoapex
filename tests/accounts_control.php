@@ -2,6 +2,8 @@
 // CLI-only helper for disposable CI fixtures; never included in deployment ZIP.
 if (PHP_SAPI!=='cli') exit(1);
 require dirname(__DIR__).'/src/bootstrap.php';
+require dirname(__DIR__).'/src/mail_queue.php';
+if ((config()['environment'] ?? '')!=='test') throw new RuntimeException('Disposable database required');
 $action=$argv[1] ?? '';
 if ($action==='rates') query('DELETE FROM rate_limits');
 elseif ($action==='expire-reset') query('UPDATE password_reset_tokens SET expires_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 MINUTE) WHERE used_at IS NULL');
@@ -10,4 +12,24 @@ elseif ($action==='permissions') query("DELETE rp FROM role_permissions rp JOIN 
 elseif ($action==='force-password') query('UPDATE users SET must_change_password=1 WHERE id=?',[$argv[2]]);
 elseif ($action==='missing-smtp') { $path=dirname(__DIR__).'/config.local.php'; $c=require $path; $c['smtp']=[]; file_put_contents($path,'<?php return '.var_export($c,true).';'); }
 elseif ($action==='delegated') query("INSERT INTO role_permissions (role_id,permission_id) SELECT r.id,p.id FROM roles r JOIN permissions p WHERE r.code='editor' AND p.code='users.manage'");
+elseif ($action==='lock-user') { db()->exec('SET innodb_lock_wait_timeout=1'); db()->beginTransaction(); query('SELECT id FROM users WHERE id=? FOR UPDATE',[$argv[2]])->fetch(); db()->rollBack(); }
+elseif ($action==='queue-ready') query("UPDATE password_recovery_jobs SET available_at=UTC_TIMESTAMP() WHERE status='pending'");
+elseif ($action==='uppercase-email') query('UPDATE users SET email=UPPER(email) WHERE id=?',[$argv[2]]);
+elseif ($action==='queue-stale') query("UPDATE password_recovery_jobs SET status='processing',attempts=1,lease_hash=REPEAT('0',64),lease_until=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 MINUTE) WHERE status='pending'");
+elseif ($action==='queue-tamper') {
+    queueEmail('tampered-queue@example.test');
+    $subject=hash_hmac('sha256','tampered-queue@example.test',recoveryQueueKey());
+    $cipher=base64_decode(query('SELECT encrypted_email FROM password_recovery_jobs WHERE subject_key=?',[$subject])->fetchColumn(),true);
+    $cipher[strlen($cipher)-1]=chr(ord($cipher[strlen($cipher)-1])^1);
+    query('UPDATE password_recovery_jobs SET encrypted_email=? WHERE subject_key=?',[base64_encode($cipher),$subject]);
+}
+elseif ($action==='queue-tamper-assert') {
+    $subject=hash_hmac('sha256','tampered-queue@example.test',recoveryQueueKey());
+    $row=query('SELECT * FROM password_recovery_jobs WHERE subject_key=?',[$subject])->fetch();
+    if (!$row || $row['status']!=='failed' || (int)$row['attempts']!==3 || $row['encrypted_email']!==null || $row['lease_hash']!==null) throw new RuntimeException('Tampered job not rejected and scrubbed');
+}
+elseif ($action==='queue-assert') {
+    if (query("SELECT id FROM password_recovery_jobs WHERE status IN ('sent','discarded','failed') AND encrypted_email IS NOT NULL")->fetchColumn()) throw new RuntimeException('Queue payload not scrubbed');
+    if (!query("SELECT id FROM password_recovery_jobs WHERE status='failed' AND attempts=3")->fetchColumn()) throw new RuntimeException('Missing retry exhaustion');
+}
 else exit(1);
