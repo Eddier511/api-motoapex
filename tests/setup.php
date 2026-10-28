@@ -19,5 +19,6 @@ db()->exec(file_get_contents(dirname(__DIR__).'/database/003_promotions.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/004_web_content.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/005_accounts.sql'));
 db()->exec(file_get_contents(dirname(__DIR__).'/database/006_security_hardening.sql'));
+require __DIR__.'/promotion_dates_migration.php'; // Applies 007 with existing disposable records.
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Test','admin@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'admin']);
 query('INSERT INTO users (name,email,password_hash,role_id) VALUES (?,?,?,(SELECT id FROM roles WHERE code=?))',['Sales','sales@example.test',password_hash('test-password-123456',PASSWORD_DEFAULT),'sales']);

@@ -74,8 +74,8 @@ POST/PUT requieren todos los campos del siguiente ejemplo salvo brandId (opciona
     "promoPrice": 7200000,
     "currency": "CRC"
   }],
-  "startsAt": "2026-10-01T00:00:00-06:00",
-  "endsAt": "2026-10-31T23:59:59-06:00",
+  "startsAt": null,
+  "endsAt": null,
   "status": "inactive",
   "featured": false,
   "showOnHome": false,
@@ -85,7 +85,18 @@ POST/PUT requieren todos los campos del siguiente ejemplo salvo brandId (opciona
 }
 ```
 
-Fechas ISO 8601 con segundos y zona explícita se convierten a UTC; respuestas startsAt/endsAt terminan en Z. Fin no puede preceder inicio. `status`: active/inactive/expired; featured/showOnHome son booleanos, order entero 0..1000000. Slug único (máximo 191 bytes, letras minúsculas/números/guiones, no solo numérico); el slug de una promoción eliminada sigue reservado (409). Título máximo 255 bytes, descripción 20000, texto de botón 100, URLs 2048; máximo 100 relaciones sin duplicados. No acepta campos desconocidos ni HTML en texto.
+`startsAt` y `endsAt` son claves requeridas en POST y PUT, con valor **null o fecha ISO 8601 con segundos y zona explícita** (`Z` o desfase como `-06:00`). Una fecha válida se convierte a UTC y se devuelve con `Z`; null se devuelve como null, nunca se omite ni se sustituye por fechas inventadas. Cadenas vacías, fechas sin zona, fechas imposibles y otros tipos producen 422.
+
+| startsAt | endsAt | Vigencia (además de status=active) |
+|---|---|---|
+| null | null | Sin límite de fechas |
+| fecha | null | Desde esa fecha, sin vencimiento |
+| null | fecha | Hasta esa fecha, sin límite inicial |
+| fecha | fecha | Entre ambas, con extremos incluidos |
+
+Si ambas fechas existen, endsAt debe ser mayor o igual que startsAt, comparando instantes ya convertidos a UTC. Ejemplo acotado: `"startsAt":"2026-10-01T00:00:00-06:00","endsAt":"2026-10-31T23:59:59-06:00"`. **PUT sigue reemplazando la ficha y relaciones completas**: enviar null explícito en una o ambas fechas para quitar esos límites; omitir una clave devuelve 422 sin cambiar la ficha. No hay duración predeterminada ni transformación automática de status a expired cuando endsAt es null. Un status expired/inactive explícito sigue siendo privado aunque no tenga fechas.
+
+`status`: active/inactive/expired; featured/showOnHome son booleanos, order entero 0..1000000. Slug único (máximo 191 bytes, letras minúsculas/números/guiones, no solo numérico); el slug de una promoción eliminada sigue reservado (409). Título máximo 255 bytes, descripción 20000, texto de botón 100, URLs 2048; máximo 100 relaciones sin duplicados. No acepta campos desconocidos ni HTML en texto.
 
 imageUrl debe ser HTTPS sin usuario/contraseña. buttonHref permite rutas internas que empiezan con `/` o HTTPS sin credenciales; prohíbe `//`, backslash, controles y esquemas ejecutables. No descarga imágenes ni permite uploads. brandId es null o ID existente no eliminado; cuando hay marca, todas las motos relacionadas deben pertenecer a ella. Motos inexistentes o eliminadas producen 422. Borradores pueden asociarse en admin, pero nunca se exponen al público.
 
@@ -93,11 +104,13 @@ Cada relación contiene una única currency (CRC o USD) aplicable **a ambos prec
 
 La respuesta incluye id como cadena, campos de la ficha, `brand` (null o `{id,name,slug,primaryColor}`) y `motorcycles` como array de `{id,motorcycleId,currency,originalPrice?,promoPrice?,motorcycle}`. El id de la relación y motorcycleId también son cadenas. motorcycle contiene solo id, slug, model, version, year, showPrice, allowQuote y brand (id/name/slug/primaryColor). Admin recibe además createdAt/updatedAt y ambos precios.
 
-Filtros públicos: active, no eliminada, `starts_at <= UTC_TIMESTAMP() <= ends_at` (extremos incluidos), marca opcional activa/no eliminada e imagen/destino seguros. Las relaciones solo incluyen motos publicadas/no eliminadas con marca/categoría activas/no eliminadas, moneda aún coincidente y marca coherente con la campaña. Si todas las relaciones dejan de ser públicas, la oferta completa desaparece (lista la omite; detalle 404). Una campaña general creada con motorcycles vacío puede seguir visible. Si showPrice=false, se omiten originalPrice/promoPrice de esa relación. No se devuelven SKU, inventario, autores, auditoría, deleted_at ni detalles administrativos. Orden ascendente por order y luego ID; showOnHome/featured no alteran la vigencia ni se fuerzan automáticamente.
+Filtros públicos, iguales para listas y detalles: active, no eliminada, `(starts_at IS NULL OR starts_at <= UTC_TIMESTAMP()) AND (ends_at IS NULL OR ends_at >= UTC_TIMESTAMP())` (extremos incluidos), marca opcional activa/no eliminada e imagen/destino seguros. Las relaciones solo incluyen motos publicadas/no eliminadas con marca/categoría activas/no eliminadas, moneda aún coincidente y marca coherente con la campaña. Si todas las relaciones dejan de ser públicas, la oferta completa desaparece (lista la omite; detalle 404). Una campaña general creada con motorcycles vacío puede seguir visible. Si showPrice=false, se omiten originalPrice/promoPrice de esa relación. No se devuelven SKU, inventario, autores, auditoría, deleted_at ni detalles administrativos. Orden ascendente por order y luego ID; showOnHome/featured no alteran la vigencia ni se fuerzan automáticamente.
 
 Eliminación es lógica (deleted_at); no borra motos, medios o relaciones históricas. No hay restauración automática. Lecturas de promociones: 300 por IP cada 15 minutos; escrituras autorizadas: 60 por IP cada 15 minutos. Al exceder: 429 JSON, Retry-After: 900, expuesto por CORS. Permanecen X-Request-ID y errores 401/403/404/409/422/429. Los orígenes de web/admin configurados siguen siendo exactos.
 
 Instalación: aplicar **003_promotions.sql una sola vez**, después de las migraciones anteriores, consultando schema_migrations y haciendo respaldo. Agrega button_label/button_href; no borra ni publica datos existentes. El dominio definitivo será https://api.motoapexcr.com/v1; cambiar la base de frontends y recompilar no cambia este contrato.
+
+Para fechas opcionales aplicar **007_optional_promotion_dates.sql**, después de 006 y de un respaldo, junto con esta revisión de API. Conserva todas las fechas y relaciones existentes, permite NULL y mantiene el CHECK de orden. No reimportar schema.sql ni asumir que main o Hostinger ya tienen esta migración. Instrucciones: docs/promotions-optional-dates.md. Admin debe enviar/recibir `string | null`; web solo muestra «Hasta el…» si endsAt contiene una fecha, nunca para null.
 
 ## Contenido web (migración 004)
 

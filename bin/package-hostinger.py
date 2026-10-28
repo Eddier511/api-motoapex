@@ -40,7 +40,8 @@ instructions = '''INSTALACION API MOTOAPEX
 
 3. Como el esquema inicial ya esta importado, verifica schema_migrations.
    Aplica 002_api_support.sql SOLO si no esta aplicada y despues
-   003_promotions.sql, 004_web_content.sql, 005_accounts.sql y 006_security_hardening.sql, una sola vez, despues de un respaldo.
+   003_promotions.sql, 004_web_content.sql, 005_accounts.sql, 006_security_hardening.sql
+   y 007_optional_promotion_dates.sql, una sola vez, despues de un respaldo.
    No vuelvas a importar schema.sql. No borres tablas para instalar la API.
 
 4. El document root debe ser public_html. Reemplaza su .htaccess por el
@@ -86,15 +87,15 @@ for directory in ('public', 'src', 'vendor'):
             if directory == 'public':
                 path = 'public_html/' + file.relative_to(root / 'public').as_posix()
             files[path] = file.read_bytes()
-for path in ('bin/create-admin.php', 'bin/process-mail-queue.php', 'bin/check-installation.php', 'bin/check-dependencies.py', 'dependencies.json', 'config/php-security.ini', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql', 'database/006_security_hardening.sql',
+for path in ('bin/create-admin.php', 'bin/process-mail-queue.php', 'bin/check-installation.php', 'bin/check-dependencies.py', 'dependencies.json', 'config/php-security.ini', 'database/002_api_support.sql', 'database/003_promotions.sql', 'database/004_web_content.sql', 'database/005_accounts.sql', 'database/006_security_hardening.sql', 'database/007_optional_promotion_dates.sql',
              'config.example.php', 'README.md', 'docs/contract.md',
-             'docs/integration-prompts.md', 'docs/hosting-403.md', 'docs/hosting-503.md', 'docs/accounts-install.md', 'docs/security-hardening.md'):
+             'docs/integration-prompts.md', 'docs/promotions-optional-dates.md', 'docs/hosting-403.md', 'docs/hosting-503.md', 'docs/accounts-install.md', 'docs/security-hardening.md'):
     files[path] = (root / path).read_bytes()
 files['LEEME-INSTALACION.txt'] = instructions.encode('utf-8')
 files['deployment-manifest.json'] = json.dumps({
     'sourceRevision': args.revision or None,
     'fileSha256': {path: hashlib.sha256(data).hexdigest() for path, data in files.items()},
-    'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts', '006_security_hardening'],
+    'requiredMigrations': ['002_api_support', '003_promotions', '004_web_content', '005_accounts', '006_security_hardening', '007_optional_promotion_dates'],
     'documentRoot': 'public_html',
     'entrypoint': 'public_html/index.php',
     'privateConfig': 'config.local.php (create on server, not included)',

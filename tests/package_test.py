@@ -10,7 +10,9 @@ archive_path = Path(sys.argv[1])
 with zipfile.ZipFile(archive_path) as archive:
     assert archive.testzip() is None
     names = set(archive.namelist())
+    assert {'database/007_optional_promotion_dates.sql','docs/promotions-optional-dates.md'}<=names
     manifest=json.loads(archive.read('deployment-manifest.json'))
+    assert '007_optional_promotion_dates' in manifest['requiredMigrations']
     assert set(manifest['fileSha256'])==names-{'deployment-manifest.json'}
     for name,digest in manifest['fileSha256'].items():
         assert hashlib.sha256(archive.read(name)).hexdigest()==digest
