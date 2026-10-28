@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+function promotionDateWindow(string $prefix=''): string {
+    // Prefix is a server constant ('' or 'p.'), never client input. UTC bounds are inclusive.
+    return "({$prefix}starts_at IS NULL OR {$prefix}starts_at<=UTC_TIMESTAMP()) AND ({$prefix}ends_at IS NULL OR {$prefix}ends_at>=UTC_TIMESTAMP())";
+}
+
 function promotionMoney(array $a, string $key): string {
     if (!array_key_exists($key,$a)) throw new InvalidArgumentException("Precio requerido: $key");
     $value=numberField($a,$key,1000000000);
@@ -18,8 +23,9 @@ function validatePromotion(array $a): array {
     if ($image==='' || parse_url($image,PHP_URL_USER)!==null || parse_url($image,PHP_URL_PASS)!==null) throw new InvalidArgumentException('Imagen HTTPS requerida, sin credenciales');
     $brand=$a['brandId'] ?? null;
     if ($brand!==null) $brand=entityId($brand,'brandId');
-    $start=utcDate($a,'startsAt'); $end=utcDate($a,'endsAt');
-    if ($end<$start) throw new InvalidArgumentException('Fin de vigencia anterior al inicio');
+    $start=$a['startsAt']===null ? null : utcDate($a,'startsAt');
+    $end=$a['endsAt']===null ? null : utcDate($a,'endsAt');
+    if ($start!==null && $end!==null && $end<$start) throw new InvalidArgumentException('Fin de vigencia anterior al inicio');
     $seen=[]; $links=[];
     foreach (listField($a,'motorcycles',100) as $item) {
         foreach (array_keys($item) as $key) if (!in_array($key,['motorcycleId','originalPrice','promoPrice','currency'],true)) throw new InvalidArgumentException("Campo desconocido en relación: $key");
@@ -41,7 +47,7 @@ function promotionRow(string $id, bool $lock=false): array {
 }
 function promotionDocument(array $row, bool $public, ?array $batch=null): ?array {
     // Public validity uses the same UTC database clock as catalog queries.
-    if ($public && $batch===null && !query("SELECT id FROM promotions WHERE id=? AND status='active' AND deleted_at IS NULL AND starts_at<=UTC_TIMESTAMP() AND ends_at>=UTC_TIMESTAMP()",[$row['id']])->fetchColumn()) return null;
+    if ($public && $batch===null && !query("SELECT id FROM promotions WHERE id=? AND status='active' AND deleted_at IS NULL AND ".promotionDateWindow(),[$row['id']])->fetchColumn()) return null;
     $brand=$batch===null ? brandSummary($row['brand_id'],$public) : ($batch['brands'][$row['brand_id']] ?? null);
     if ($public && $row['brand_id']!==null && $brand===null) return null;
     $image=$batch===null ? mediaUrl($row['image_media_id']) : ($batch['media'][$row['image_media_id']] ?? '');
@@ -107,7 +113,7 @@ function handlePromotions(string $scope, string $method, ?string $id, ?array $us
     if ($method==='GET') {
         limit('promotions-read',300);
         $public=$scope==='public';
-        $where="p.deleted_at IS NULL".($public ? " AND p.status='active' AND p.starts_at<=UTC_TIMESTAMP() AND p.ends_at>=UTC_TIMESTAMP() AND (p.brand_id IS NULL OR EXISTS (SELECT 1 FROM brands b WHERE b.id=p.brand_id AND b.status='active' AND b.deleted_at IS NULL))" : '');
+        $where="p.deleted_at IS NULL".($public ? " AND p.status='active' AND ".promotionDateWindow('p.')." AND (p.brand_id IS NULL OR EXISTS (SELECT 1 FROM brands b WHERE b.id=p.brand_id AND b.status='active' AND b.deleted_at IS NULL))" : '');
         $rows=$id!==null ? [promotionRow($id)] : listRows('promotions p',$where,[],'p');
         // Detail validity remains checked against the database, including its UTC clock.
         $batch=$id===null ? promotionBatch($rows,$public) : null;

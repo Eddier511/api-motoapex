@@ -62,3 +62,7 @@ Usuarios, configuración, recuperación SMTP y MFA están implementados en el PR
 ## Actualización de seguridad
 
 Ver docs/security-hardening.md. Requiere migración 006 y cron privado cada minuto para bin/process-mail-queue.php. La API encola recuperación y no realiza SMTP durante HTTP. El ZIP no instala PHP ni cambia Hostinger. No sobrescribir config.local.php.
+
+## Promociones sin fechas
+
+La rama codex/promotions-optional-dates agrega migración incremental 007 para startsAt/endsAt anulables. Ver docs/promotions-optional-dates.md y el contrato antes de conectar frontends. Instalar solo migraciones pendientes y coordinar API/admin/web; no reimportar schema.sql ni asumir que la rama está desplegada.
